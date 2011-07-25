@@ -105,7 +105,6 @@
 /* Configured OTP methods.  */
 struct otp_method otp_methods[] = {
     {"basicauth", otp_basicauth_server_init, 0, NULL, NULL},
-    {"ykclient", otp_ykclient_server_init, 0, NULL, NULL},
     {NULL, NULL, 0, NULL, NULL}
 };
 
