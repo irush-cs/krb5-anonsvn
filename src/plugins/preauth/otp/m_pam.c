@@ -62,6 +62,16 @@ otp_pam_verify_otp(const struct otp_server_ctx *otp_ctx, const char *pw)
     return ret;
 }
 
+static int
+otp_pam_challenge(const struct otp_server_ctx *ctx,
+                  krb5_pa_otp_challenge *challenge) {
+    if (challenge->otp_service.length != 0)
+        free(challenge->otp_service.data);
+    challenge->otp_service.data = strdup("hello");
+    challenge->otp_service.length = strlen("hello") + 1;
+    return 0;
+}
+
 int
 otp_pam_server_init(struct otp_server_ctx *otp_ctx,
                     get_config_func_t get_config,
@@ -79,6 +89,7 @@ otp_pam_server_init(struct otp_server_ctx *otp_ctx,
     }
     ft->server_fini = otp_pam_server_fini;
     ft->server_verify = otp_pam_verify_otp;
+    ft->server_challenge = otp_pam_challenge;
     ctx = calloc(1, sizeof(*ctx));
     if (ctx == NULL) {
         retval = ENOMEM;
