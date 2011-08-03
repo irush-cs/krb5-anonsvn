@@ -28,12 +28,23 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* FAST OTP plugin method using simplified PAM backend  */
+/*
+ * FAST OTP plugin method using simplified PAM backend
+ * 
+ * By default, the user is the principal name and the service is "krb5.<realm>"
+ * (note that some pam implementation will put the service in lower case). If
+ * the blob is available, then it contains <user>@<service> where both <user>
+ * and <service> are optional (if no @, considered as service).
+ */
 
 #include <errno.h>
 
 #include "otp.h"
 #include "m_pam.h"
+
+int otp_pam_get_user_service(const struct otp_server_ctx *ctx,
+                             char** user,
+                             char** service);
 
 struct otp_pam_ctx {
     int a;
@@ -65,11 +76,26 @@ otp_pam_verify_otp(const struct otp_server_ctx *otp_ctx, const char *pw)
 static int
 otp_pam_challenge(const struct otp_server_ctx *ctx,
                   krb5_pa_otp_challenge *challenge) {
+    char* user = NULL;
+    char* service = NULL;
+    int retval = 0;
+
+    if (ctx->client == NULL) {
+        SERVER_DEBUG("[pam] don't know who the the client is");
+        return 1;
+    }
+
+    retval = otp_pam_get_user_service(ctx, &user, &service);
+    if (retval != 0) {
+        return retval;
+    }
+
+
     if (challenge->otp_service.length != 0)
         free(challenge->otp_service.data);
     challenge->otp_service.data = strdup("hello");
     challenge->otp_service.length = strlen("hello") + 1;
-    return 0;
+    return retval;
 }
 
 int
@@ -105,5 +131,96 @@ otp_pam_server_init(struct otp_server_ctx *otp_ctx,
         free(ft);
     if (ctx != NULL)
         free(ctx);
+    return retval;
+}
+
+
+
+/**
+ * pam stuff
+ */
+int
+otp_pam_get_user_service(const struct otp_server_ctx *ctx,
+                         char** user,
+                         char** service) {
+    int len = 0;
+    char* str = NULL;
+    char* c;
+    int retval = -1;
+    *user = NULL;
+    *service = NULL;
+
+    if (ctx->blobsize > 0) {
+        // will force a \0 terminated string
+        str = calloc(1, ctx->blobsize + 1);
+        if (str == NULL) {
+            retval = ENOMEM;
+            goto error;
+        }
+        memcpy(str, ctx->blob, ctx->blobsize);
+        c = strchr(str, '@');
+        if (c != NULL) {
+            *c++ = NULL;
+            if (str[0] != NULL) {
+                *user = strdup(str);
+                if (*user == NULL) {
+                    retval = ENOMEM;
+                    goto error;
+                }
+            }
+        } else {
+            c = str;
+        }
+
+        if (c[0] != NULL) {
+            *service = strdup(c);
+            if (*service == NULL) {
+                retval = ENOMEM;
+                goto error;
+            }
+        }
+    }
+
+    if (*user == NULL) {
+        len = krb5_princ_name(ctx->krb5_context, ctx->client->princ)->length;
+        if ((*user = calloc(1, len + 1)) == NULL) {
+            retval = ENOMEM;
+            goto error;
+        }
+        strncpy(*user,
+                krb5_princ_name(ctx->krb5_context, ctx->client->princ)->data,
+                len);
+    }
+
+    if (*service == NULL) {
+        len = krb5_princ_realm(ctx->krb5_context, ctx->client->princ)->length;
+        if ((*service = calloc(1, len + 1 + 5)) == NULL) {
+            retval = ENOMEM;
+            goto error;
+        }
+        strcpy(*service, "krb5.");
+        strncat(*service,
+                krb5_princ_realm(ctx->krb5_context, ctx->client->princ)->data,
+                len);
+    }
+
+    SERVER_DEBUG("[pam] got user: %s, service: %s, from %s", *user, *service,
+                 (ctx->blobsize > 0 ? "blob" : "principal"));
+
+    if (str != NULL)
+        free(str);
+    return 0;
+    
+ error:
+    if (str != NULL)
+        free(str);
+    if (*user != NULL) {
+        free(*user);
+        *user = NULL;
+    }
+    if (*service != NULL) {
+        free(*service);
+        *service = NULL;
+    }
     return retval;
 }
