@@ -42,7 +42,7 @@
 #include "otp.h"
 #include "m_pam.h"
 
-int otp_pam_get_user_service(const struct otp_server_ctx *ctx,
+int otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                              char** user,
                              char** service);
 
@@ -59,9 +59,9 @@ otp_pam_server_fini(void *method_context)
 }
 
 static int
-otp_pam_verify_otp(const struct otp_server_ctx *otp_ctx, const char *pw)
+otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
 {
-    struct otp_pam_ctx *ctx = OTP_METHOD_CONTEXT(otp_ctx);
+    //struct otp_pam_ctx *ctx = OTP_METHOD_CONTEXT(otp_ctx);
     int ret = 0;
     //assert(otp_ctx != NULL);
 
@@ -74,7 +74,7 @@ otp_pam_verify_otp(const struct otp_server_ctx *otp_ctx, const char *pw)
 }
 
 static int
-otp_pam_challenge(const struct otp_server_ctx *ctx,
+otp_pam_challenge(const struct otp_req_ctx *ctx,
                   krb5_pa_otp_challenge *challenge) {
     char* user = NULL;
     char* service = NULL;
@@ -140,7 +140,7 @@ otp_pam_server_init(struct otp_server_ctx *otp_ctx,
  * pam stuff
  */
 int
-otp_pam_get_user_service(const struct otp_server_ctx *ctx,
+otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                          char** user,
                          char** service) {
     int len = 0;
@@ -160,8 +160,8 @@ otp_pam_get_user_service(const struct otp_server_ctx *ctx,
         memcpy(str, ctx->blob, ctx->blobsize);
         c = strchr(str, '@');
         if (c != NULL) {
-            *c++ = NULL;
-            if (str[0] != NULL) {
+            *c++ = 0;
+            if (str[0] != 0) {
                 *user = strdup(str);
                 if (*user == NULL) {
                     retval = ENOMEM;
@@ -172,7 +172,7 @@ otp_pam_get_user_service(const struct otp_server_ctx *ctx,
             c = str;
         }
 
-        if (c[0] != NULL) {
+        if (c[0] != 0) {
             *service = strdup(c);
             if (*service == NULL) {
                 retval = ENOMEM;
