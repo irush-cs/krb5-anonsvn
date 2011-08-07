@@ -18,7 +18,7 @@ RELDIR=../plugins/preauth/otp
 SHLIB_EXPDEPS = \
 	$(TOPLIBD)/libk5crypto$(SHLIBEXT) \
 	$(TOPLIBD)/libkrb5$(SHLIBEXT)
-SHLIB_EXPLIBS= -lkrb5 -lkadm5srv_mit -lcom_err -lk5crypto -lykclient -lcurl $(SUPPORT_LIB) $(LIBS)
+SHLIB_EXPLIBS= -lkrb5 -lkadm5srv_mit -lcom_err -lk5crypto -lykclient -lcurl -lpam $(SUPPORT_LIB) $(LIBS)
 
 SHLIB_DIRS=-L$(TOPLIBD)
 SHLIB_RDIRS=$(KRB5_LIBDIR)
