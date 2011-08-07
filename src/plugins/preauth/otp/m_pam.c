@@ -38,6 +38,7 @@
  */
 
 #include <errno.h>
+#include <security/pam_appl.h>
 
 #include "otp.h"
 #include "m_pam.h"
@@ -45,11 +46,16 @@
 int otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                              char** user,
                              char** service);
+int otp_pam_auth(char* user, char* service, char* password, char** prompt);
 
 struct otp_pam_ctx {
     int a;
-    //ykclient_t *yk_ctx;
 };
+
+typedef struct _otp_pam_conv_data {
+    char* prompt;
+    char* password;
+} otp_pam_conv_data;
 
 static void
 otp_pam_server_fini(void *method_context)
@@ -78,6 +84,7 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
                   krb5_pa_otp_challenge *challenge) {
     char* user = NULL;
     char* service = NULL;
+    char* prompt = NULL;
     int retval = 0;
 
     if (ctx->client == NULL) {
@@ -93,8 +100,14 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
 
     if (challenge->otp_service.length != 0)
         free(challenge->otp_service.data);
-    challenge->otp_service.data = strdup("hello");
-    challenge->otp_service.length = strlen("hello") + 1;
+
+    otp_pam_auth(user, service, NULL, &prompt);
+            
+    challenge->otp_service.data = prompt;
+    challenge->otp_service.length = strlen(prompt);
+    
+    free(user);
+    free(service);
     return retval;
 }
 
@@ -139,6 +152,10 @@ otp_pam_server_init(struct otp_server_ctx *otp_ctx,
 /**
  * pam stuff
  */
+
+/** if succeeds, *user and *service will be allocated with the pam's username
+    and service (according to either the blob or the principal). They should be
+    freed after use */
 int
 otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                          char** user,
@@ -223,4 +240,109 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
         *service = NULL;
     }
     return retval;
+}
+
+/** the pam conversation function. */
+int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response **resp, void *data);
+int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response **resp, void *data) {
+    struct pam_response *aresp;
+    otp_pam_conv_data* pam_data = (otp_pam_conv_data*)data;
+    int retval = PAM_SUCCESS;
+    int i;
+    
+    if (n <= 0 || n > PAM_MAX_NUM_MSG)
+        return (PAM_CONV_ERR);
+    
+    if ((aresp = calloc(n, sizeof *aresp)) == NULL)
+        return (PAM_BUF_ERR);
+
+    for (i = 0; i < n; ++i) {
+        aresp[i].resp_retcode = 0;
+        switch (msg[i]->msg_style) {
+          case PAM_PROMPT_ECHO_OFF:
+          case PAM_PROMPT_ECHO_ON:
+              // if no password, get the prompt. Otherwise, set the password.
+              if (pam_data->password == NULL) {
+                  pam_data->prompt = strdup(msg[i]->msg);
+                  if (pam_data->prompt == NULL)
+                      goto buferr;
+                  goto converr;
+              } else {
+                  aresp[i].resp = strdup(pam_data->password);
+                  if (aresp[i].resp == NULL)
+                      goto buferr;
+              }
+              break;
+
+          case PAM_ERROR_MSG:
+          case PAM_TEXT_INFO:
+              goto converr;
+              //aresp[i].resp = malloc(0);
+
+        default:
+            break;
+        }
+    }
+
+    *resp = aresp;
+    return (PAM_SUCCESS);
+
+ converr:
+    retval = PAM_CONV_ERR;
+    goto failure;
+ buferr:
+    retval = PAM_BUF_ERR;
+ failure:
+    for (i = 0; i < n; i++) {
+        if (aresp[i].resp)
+            free(aresp[i].resp);
+    }
+    free(aresp);
+    return retval;
+}
+
+// returns the pam result (PAM_SUCCESS on success)
+int
+otp_pam_auth(char* user, char* service, char* password, char** prompt) {
+    struct pam_conv conv;
+    otp_pam_conv_data data;
+    pam_handle_t* pamh = NULL;
+    int pamres = 0;
+    int i;
+    
+    memset(&data, 0, sizeof(data));
+    if (password != NULL) {
+        data.password = password;
+    }
+
+    conv.conv = &otp_pam_converse;
+    conv.appdata_ptr = &data;
+
+    if ((pamres = pam_start(service, user, &conv, &pamh)) != PAM_SUCCESS) {
+        SERVER_DEBUG("[pam] pam_start(%s, %s, &conv, &pamh) = %i (%s)\n",
+                     service, user, pamres, pam_strerror(pamh, pamres));
+        pam_end(pamh, pamres);
+        return pamres;
+    }
+
+    pamres = pam_authenticate(pamh, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK);
+
+    if (data.prompt != NULL && prompt != NULL) {
+        *prompt = data.prompt;
+        for (i = strlen(*prompt) - 1; i >= 0; i--) {
+            switch ((*prompt)[i]) {
+              case ' ':
+              case '\t':
+              case ':':
+              case '\n':
+                  (*prompt)[i] = 0;
+                  break;
+              default:
+                  i = -1;
+            }
+        }
+    }
+    
+    pam_end(pamh, pamres);
+    return pamres;
 }
