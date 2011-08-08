@@ -46,7 +46,7 @@
 int otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                              char** user,
                              char** service);
-int otp_pam_auth(char* user, char* service, char* password, char** prompt);
+int otp_pam_auth(char* user, char* service, const char* password, char** prompt);
 
 struct otp_pam_ctx {
     int a;
@@ -54,7 +54,7 @@ struct otp_pam_ctx {
 
 typedef struct _otp_pam_conv_data {
     char* prompt;
-    char* password;
+    const char* password;
 } otp_pam_conv_data;
 
 static void
@@ -67,16 +67,26 @@ otp_pam_server_fini(void *method_context)
 static int
 otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
 {
-    //struct otp_pam_ctx *ctx = OTP_METHOD_CONTEXT(otp_ctx);
-    int ret = 0;
-    //assert(otp_ctx != NULL);
-
-    if (pw == NULL) {
-        SERVER_DEBUG("[pam] password is missing.");
-        return EINVAL;
+    char* user = NULL;
+    char* service = NULL;
+    int retval = 0;
+    SERVER_DEBUG("[pam] otp_pam_verify_otp called");
+        
+    if (otp_ctx->client == NULL) {
+        SERVER_DEBUG("[pam] don't know who the the client is");
+        return 1;
     }
+
+    retval = otp_pam_get_user_service(otp_ctx, &user, &service);
+    if (retval != 0) {
+        return retval;
+    }
+
+    retval = otp_pam_auth(user, service, pw, NULL);
     
-    return ret;
+    free(user);
+    free(service);
+    return retval;
 }
 
 static int
@@ -87,6 +97,8 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
     char* prompt = NULL;
     int retval = 0;
 
+    SERVER_DEBUG("[pam] otp_pam_challenge called");
+    
     if (ctx->client == NULL) {
         SERVER_DEBUG("[pam] don't know who the the client is");
         return 1;
@@ -303,7 +315,7 @@ int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response 
 
 // returns the pam result (PAM_SUCCESS on success)
 int
-otp_pam_auth(char* user, char* service, char* password, char** prompt) {
+otp_pam_auth(char* user, char* service, const char* password, char** prompt) {
     struct pam_conv conv;
     otp_pam_conv_data data;
     pam_handle_t* pamh = NULL;
