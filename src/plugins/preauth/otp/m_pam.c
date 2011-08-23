@@ -30,7 +30,7 @@
 
 /*
  * FAST OTP plugin method using simplified PAM backend
- * 
+ *
  * By default, the user is the principal name and the service is "krb5.<realm>"
  * (note that some pam implementation will put the service in lower case). If
  * the blob is available, then it contains <user>@<service> where both <user>
@@ -46,7 +46,10 @@
 int otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                              char** user,
                              char** service);
-int otp_pam_auth(char* user, char* service, const char* password, char** prompt);
+int otp_pam_auth(char* user,
+                 char* service,
+                 const char* password,
+                 char** prompt);
 
 struct otp_pam_ctx {
     int a;
@@ -70,10 +73,10 @@ otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
     char* user = NULL;
     char* service = NULL;
     int retval = 0;
-    SERVER_DEBUG("[pam] otp_pam_verify_otp called");
-        
+    SERVER_DEBUG("[pam] otp_pam_verify_otp called.");
+
     if (otp_ctx->client == NULL) {
-        SERVER_DEBUG("[pam] don't know who the the client is");
+        SERVER_DEBUG("[pam] don't know who the the client is.");
         return 1;
     }
 
@@ -83,7 +86,7 @@ otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
     }
 
     retval = otp_pam_auth(user, service, pw, NULL);
-    
+
     free(user);
     free(service);
     return retval;
@@ -91,16 +94,17 @@ otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
 
 static int
 otp_pam_challenge(const struct otp_req_ctx *ctx,
-                  krb5_pa_otp_challenge *challenge) {
+                  krb5_pa_otp_challenge *challenge)
+{
     char* user = NULL;
     char* service = NULL;
     char* prompt = NULL;
     int retval = 0;
 
-    SERVER_DEBUG("[pam] otp_pam_challenge called");
-    
+    SERVER_DEBUG("[pam] otp_pam_challenge called.");
+
     if (ctx->client == NULL) {
-        SERVER_DEBUG("[pam] don't know who the the client is");
+        SERVER_DEBUG("[pam] don't know who the the client is.");
         return 1;
     }
 
@@ -114,10 +118,10 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
         free(challenge->otp_service.data);
 
     otp_pam_auth(user, service, NULL, &prompt);
-            
+
     challenge->otp_service.data = prompt;
     challenge->otp_service.length = strlen(prompt);
-    
+
     free(user);
     free(service);
     return retval;
@@ -146,7 +150,7 @@ otp_pam_server_init(struct otp_server_ctx *otp_ctx,
         retval = ENOMEM;
         goto errout;
     }
-    
+
     *ftable = ft;
     *method_context = ctx;
     return 0;
@@ -171,7 +175,8 @@ otp_pam_server_init(struct otp_server_ctx *otp_ctx,
 int
 otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                          char** user,
-                         char** service) {
+                         char** service)
+{
     int len = 0;
     char* str = NULL;
     char* c;
@@ -180,7 +185,7 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
     *service = NULL;
 
     if (ctx->blobsize > 0) {
-        // will force a \0 terminated string
+        /* will force a \0 terminated string */
         str = calloc(1, ctx->blobsize + 1);
         if (str == NULL) {
             retval = ENOMEM;
@@ -233,13 +238,13 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                 len);
     }
 
-    SERVER_DEBUG("[pam] got user: %s, service: %s, from %s", *user, *service,
+    SERVER_DEBUG("[pam] got user: %s, service: %s, from %s.", *user, *service,
                  (ctx->blobsize > 0 ? "blob" : "principal"));
 
     if (str != NULL)
         free(str);
     return 0;
-    
+
  error:
     if (str != NULL)
         free(str);
@@ -255,16 +260,26 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
 }
 
 /** the pam conversation function. */
-int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response **resp, void *data);
-int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response **resp, void *data) {
+int
+otp_pam_converse(int n,
+                 const struct pam_message **msg,
+                 struct pam_response **resp,
+                 void *data);
+
+int
+otp_pam_converse(int n,
+                     const struct pam_message **msg,
+                     struct pam_response **resp,
+                     void *data)
+{
     struct pam_response *aresp;
     otp_pam_conv_data* pam_data = (otp_pam_conv_data*)data;
     int retval = PAM_SUCCESS;
     int i;
-    
+
     if (n <= 0 || n > PAM_MAX_NUM_MSG)
         return (PAM_CONV_ERR);
-    
+
     if ((aresp = calloc(n, sizeof *aresp)) == NULL)
         return (PAM_BUF_ERR);
 
@@ -273,7 +288,7 @@ int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response 
         switch (msg[i]->msg_style) {
           case PAM_PROMPT_ECHO_OFF:
           case PAM_PROMPT_ECHO_ON:
-              // if no password, get the prompt. Otherwise, set the password.
+              /* If no password, get the prompt. Otherwise, set the password. */
               if (pam_data->password == NULL) {
                   pam_data->prompt = strdup(msg[i]->msg);
                   if (pam_data->prompt == NULL)
@@ -289,7 +304,6 @@ int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response 
           case PAM_ERROR_MSG:
           case PAM_TEXT_INFO:
               goto converr;
-              //aresp[i].resp = malloc(0);
 
         default:
             break;
@@ -313,15 +327,16 @@ int otp_pam_converse(int n, const struct pam_message **msg, struct pam_response 
     return retval;
 }
 
-// returns the pam result (PAM_SUCCESS on success)
+/* Returns the pam result (PAM_SUCCESS on success) */
 int
-otp_pam_auth(char* user, char* service, const char* password, char** prompt) {
+otp_pam_auth(char* user, char* service, const char* password, char** prompt)
+{
     struct pam_conv conv;
     otp_pam_conv_data data;
     pam_handle_t* pamh = NULL;
     int pamres = 0;
     int i;
-    
+
     memset(&data, 0, sizeof(data));
     if (password != NULL) {
         data.password = password;
@@ -354,7 +369,7 @@ otp_pam_auth(char* user, char* service, const char* password, char** prompt) {
             }
         }
     }
-    
+
     pam_end(pamh, pamres);
     return pamres;
 }
