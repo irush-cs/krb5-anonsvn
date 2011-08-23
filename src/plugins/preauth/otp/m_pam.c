@@ -113,15 +113,20 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
         return retval;
     }
 
+    /* Should fail as password == NULL, so check if prompt != NULL */
+    otp_pam_auth(user, service, NULL, &prompt);
+    if (prompt == NULL) {
+        retval = 1;
+        goto out;
+    }
 
     if (challenge->otp_service.length != 0)
         free(challenge->otp_service.data);
 
-    otp_pam_auth(user, service, NULL, &prompt);
-
     challenge->otp_service.data = prompt;
     challenge->otp_service.length = strlen(prompt);
 
+ out:
     free(user);
     free(service);
     return retval;
