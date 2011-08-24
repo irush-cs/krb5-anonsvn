@@ -716,6 +716,20 @@ otp_server_get_edata(krb5_context context,
         goto errout;
     }
 
+    /* Let the method set up the challenge (otp_service mainly) */
+    if (otp_req->method->ftable->server_challenge) {
+        retval = otp_req->method->ftable->server_challenge(otp_req,
+                                                           &otp_challenge);
+        if (retval != 0) {
+            SERVER_DEBUG("[%s] server_challenge failed.",
+                         otp_req->method->name);
+            goto errout;
+        }
+    } else {
+        SERVER_DEBUG("Method [%s] doesn't set a challenge.",
+                     otp_req->method->name);
+    }
+
     /* Create nonce from random data + timestamp.  Length of random
        data equals the length of the server key.  The timestamp is 4
        octets current time, seconds since the epoch and 4 bytes
@@ -756,10 +770,15 @@ otp_server_get_edata(krb5_context context,
     pa_data_out->contents = (krb5_octet *) encoded_otp_challenge->data;
     pa_data_out->length = encoded_otp_challenge->length;
 
-    return 0;
+    retval = 0;
+    goto out;
 
  errout:
     krb5_free_keyblock(context, armor_key);
+
+ out:
+    if (otp_challenge.otp_service.length)
+        free(otp_challenge.otp_service.data);
     otp_server_free_req_ctx(&otp_req);
     return retval;
 }
