@@ -26,6 +26,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "k5-int.h"
 #include <krb5/krb5.h>
 #include <kdb.h>
 #include "adm_proto.h"          /* for krb5_klog_syslog */
@@ -75,6 +76,9 @@ typedef void (*otp_server_fini_func_t)(void *method_context);
 typedef int (*otp_server_verify_func_t)(const struct otp_req_ctx *req_ctx,
                                         const char *pw);
 
+/* Function to set up the challange to be sent to the client. */
+typedef int (*otp_server_challenge_func_t)(const struct otp_req_ctx *ctx,
+                                           krb5_pa_otp_challenge *challenge);
 
 struct otp_tlv {
     unsigned int type;
@@ -87,6 +91,8 @@ struct otp_method_ftable {
     otp_server_fini_func_t server_fini;
     /** Verification function, see \a otp_server_verify_func_t.  */
     otp_server_verify_func_t server_verify;
+    /** Set up any necessary parameters in the krb5_pa_otp_challenge */
+    otp_server_challenge_func_t server_challenge;
 };
 
 struct otp_method {
