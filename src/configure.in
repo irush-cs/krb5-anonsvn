@@ -1087,8 +1087,8 @@ CFLAGS=$old_CFLAGS
 # This check is for plugins/preauth/otp.
 AC_CHECK_LIB(curl, curl_global_init,
   	     [otp_preauth_plugin=plugins/preauth/otp], [otp_preauth_plugin=])
-AC_CHECK_LIB(ykclient, ykclient_init,
-             [otp_preauth_plugin=plugins/preauth/otp], [otp_preauth_plugin=])
+#AC_CHECK_LIB(ykclient, ykclient_init,
+#             [otp_preauth_plugin=plugins/preauth/otp], [otp_preauth_plugin=])
 if test -n "$otp_preauth_plugin"; then
   AC_MSG_NOTICE([Found all dependencies for OTP preauth plugin, enabling.])
 else
