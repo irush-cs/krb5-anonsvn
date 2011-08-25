@@ -80,6 +80,21 @@
   A token id may be passed to the KDC using the pre-authentication
   attribute "OTP_TOKENID".  If no OTP_TOKENID is provided, the first
   KRB5_TL_OTP_ID found in the kdb is used.
+
+  If OTP is not passed to the client by other means (gic), the standard
+  prompter is used with the otp_service as prompt (excluding trailing spaces
+  and semicolons). The otp_hidden subsection in krb5.conf (in the libdefaults
+  section) can be used to specify which otp_service will have a hidden prompt
+  (echo password). e.g.
+
+      [libdefaults]
+          otp_hidden = {
+              My_OTP = false
+              OTP_Password = true
+          }
+
+  This should be set on the client machine configuration.
+
  */
 
 #include <stdbool.h>
@@ -230,6 +245,10 @@ otp_client_process(krb5_context context,
     krb5_data *encoded_otp_req = NULL;
     krb5_pa_otp_challenge *otp_challenge = NULL;
     krb5_data encoded_otp_challenge;
+    krb5_prompt prompt[1];
+    int hidden = 0;
+    char buffer[256];
+    char* c;
 
     retval = fast_get_armor_key(context, get_data, rock, &armor_key);
     if (retval != 0 || armor_key == NULL) {
@@ -303,11 +322,56 @@ otp_client_process(krb5_context context,
         }
 
         if (otp_ctx->otp == NULL) {
-            CLIENT_DEBUG("Missing client context.\n");
-        } else {
-            otp_req.otp_value.data = otp_ctx->otp;
-            otp_req.otp_value.length = strlen(otp_ctx->otp);
+            strncpy(buffer, otp_challenge->otp_service.data, sizeof(buffer));
+            buffer[sizeof(buffer) - 1] = 0;
+            c = buffer;
+            while (*c != 0) {
+                if (*c == ' ') *c = '_';
+                ++c;
+            }
+            if (profile_get_boolean(context->profile,
+                                    KRB5_CONF_LIBDEFAULTS,
+                                    "otp_hidden",
+                                    buffer,
+                                    0, &hidden) != 0) {
+                CLIENT_DEBUG("%s: profile_get_boolean error: %d.", __func__,
+                             retval);
+            }
+            CLIENT_DEBUG("profile_get_boolean(%s, %s, %s) = %i\n",
+                         KRB5_CONF_LIBDEFAULTS, "otp_hidden", buffer, hidden);
+            if (otp_challenge->otp_service.length == 0) {
+                prompt[0].prompt = "OTP";
+            } else {
+                prompt[0].prompt = otp_challenge->otp_service.data;
+            }
+            prompt[0].hidden = hidden;
+            prompt[0].reply = calloc(1, sizeof(krb5_data));
+            if (prompt[0].reply == NULL) {
+                retval = ENOMEM;
+                goto errout;
+            }
+            prompt[0].reply->length = 64;
+            prompt[0].reply->data = calloc(1, 64);
+            if (prompt[0].reply->data == NULL) {
+                free(prompt[0].reply);
+                retval = ENOMEM;
+                goto errout;
+            }
+#ifdef DEBUG
+            prompter(context, prompter_data, "Name", "Banner", 1, prompt);
+#else
+            prompter(context, prompter_data, NULL, NULL, 1, prompt);
+#endif
+            otp_ctx->otp = prompt[0].reply->data;
+            free(prompt[0].reply);
         }
+#ifdef DEBUG
+        if (strlen(otp_ctx->otp) == 0) {
+            CLIENT_DEBUG("Got zero length OTP from client.\n");
+        }
+#endif
+        otp_req.otp_value.data = otp_ctx->otp;
+        otp_req.otp_value.length = strlen(otp_ctx->otp);
 
         retval = encode_krb5_pa_otp_req(&otp_req, &encoded_otp_req);
         if (retval != 0) {
