@@ -135,10 +135,12 @@
 #include "otp.h"
 #include "m_basicauth.h"
 #include "m_ykclient.h"
+#include "m_pam.h"
 
 /* Configured OTP methods.  */
 struct otp_method otp_methods[] = {
     {"basicauth", otp_basicauth_server_init, 0, NULL, NULL},
+    {"pam", otp_pam_server_init, 0, NULL, NULL},
     {NULL, NULL, 0, NULL, NULL}
 };
 
