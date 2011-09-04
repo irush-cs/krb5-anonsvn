@@ -27,6 +27,7 @@ SHLIB_RDIRS=$(KRB5_LIBDIR)
 STOBJLISTS=OBJS.ST
 STLIBOBJS= \
 	otp_main.o \
+<<<<<<< Updated upstream
 	m_basicauth.o \
 	m_ykclient.o
 
@@ -34,6 +35,17 @@ SRCS= \
 	$(srcdir)/otp_main.c \
 	$(srcdir)/m_basicauth.c \
 	$(srcdir)/m_ykclient.c
+=======
+	m_pam.o \
+	m_basicauth.o
+#	m_ykclient.o
+
+SRCS= \
+	$(srcdir)/otp_main.c \
+	$(srcdir)/m_pam.c \
+	$(srcdir)/m_basicauth.c
+#	$(srcdir)/m_ykclient.c
+>>>>>>> Stashed changes
 
 all-unix:: all-liblinks
 install-unix:: install-libs
