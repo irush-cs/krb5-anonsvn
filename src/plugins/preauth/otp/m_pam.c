@@ -186,17 +186,18 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
     char* str = NULL;
     char* c;
     int retval = -1;
+    int blobsize = ctx->blob ? strlen(ctx->blob) : 0;
     *user = NULL;
     *service = NULL;
 
-    if (ctx->blobsize > 0) {
+    if (blobsize > 0) {
         /* will force a \0 terminated string */
-        str = calloc(1, ctx->blobsize + 1);
+        str = calloc(1, blobsize + 1);
         if (str == NULL) {
             retval = ENOMEM;
             goto error;
         }
-        memcpy(str, ctx->blob, ctx->blobsize);
+        memcpy(str, ctx->blob, blobsize);
         c = strchr(str, '@');
         if (c != NULL) {
             *c++ = 0;
@@ -244,7 +245,7 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
     }
 
     SERVER_DEBUG("[pam] got user: %s, service: %s, from %s.", *user, *service,
-                 (ctx->blobsize > 0 ? "blob" : "principal"));
+                 (blobsize > 0 ? "blob" : "principal"));
 
     if (str != NULL)
         free(str);
