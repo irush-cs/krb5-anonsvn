@@ -120,11 +120,15 @@ krb5_init_preauth_context(krb5_context kcontext)
     if (kcontext->preauth_context != NULL)
         return;
 
-    /* Auto-register pkinit and encrypted challenge if possible. */
+    /* Auto-register built-in modules. */
     k5_plugin_register_dyn(kcontext, PLUGIN_INTERFACE_CLPREAUTH, "pkinit",
                            "preauth");
-    k5_plugin_register_dyn(kcontext, PLUGIN_INTERFACE_CLPREAUTH,
-                           "encrypted_challenge", "preauth");
+    k5_plugin_register(kcontext, PLUGIN_INTERFACE_CLPREAUTH,
+                       "encrypted_challenge",
+                       clpreauth_encrypted_challenge_initvt);
+    k5_plugin_register(kcontext, PLUGIN_INTERFACE_CLPREAUTH,
+                       "encrypted_timestamp",
+                       clpreauth_encrypted_timestamp_initvt);
 
     /* Get all available clpreauth vtables. */
     if (k5_plugin_load_all(kcontext, PLUGIN_INTERFACE_CLPREAUTH, &plugins))
@@ -371,93 +375,50 @@ grow_pa_list(krb5_pa_data ***out_pa_list, int *out_pa_list_size,
     return 0;
 }
 
-/*
- * Retrieve a specific piece of information required by the plugin and
- * return it in a new krb5_data item.  There are separate request_types
- * to obtain the data and free it.
- *
- * This may require massaging data into a contrived format, but it will
- * hopefully keep us from having to reveal library-internal functions
- * or data to the plugin modules.
- */
+static krb5_enctype
+get_etype(krb5_context context, krb5_clpreauth_rock rock)
+{
+    return *rock->etype;
+}
+
+static krb5_keyblock *
+fast_armor(krb5_context context, krb5_clpreauth_rock rock)
+{
+    return rock->fast_state->armor_key;
+}
 
 static krb5_error_code
-client_data_proc(krb5_context kcontext, krb5_clpreauth_rock rock,
-                 krb5_int32 request_type, krb5_data **retdata)
+get_as_key(krb5_context context, krb5_clpreauth_rock rock,
+           krb5_keyblock **keyblock)
 {
-    krb5_data *ret;
-    krb5_error_code retval;
-    char *data;
+    krb5_error_code ret;
 
-    if (rock->magic != CLIENT_ROCK_MAGIC)
-        return EINVAL;
-    if (retdata == NULL)
-        return EINVAL;
-
-    switch (request_type) {
-    case krb5_clpreauth_get_etype:
-    {
-        krb5_enctype *eptr;
-        ret = malloc(sizeof(krb5_data));
-        if (ret == NULL)
-            return ENOMEM;
-        data = malloc(sizeof(krb5_enctype));
-        if (data == NULL) {
-            free(ret);
-            return ENOMEM;
-        }
-        ret->data = data;
-        ret->length = sizeof(krb5_enctype);
-        eptr = (krb5_enctype *)data;
-        *eptr = *rock->etype;
-        *retdata = ret;
-        return 0;
-    }
-    break;
-    case krb5_clpreauth_free_etype:
-        ret = *retdata;
-        if (ret == NULL)
-            return 0;
-        if (ret->data)
-            free(ret->data);
-        free(ret);
-        return 0;
-        break;
-    case krb5_clpreauth_fast_armor: {
-        krb5_keyblock *key = NULL;
-        ret = calloc(1, sizeof(krb5_data));
-        if (ret == NULL)
-            return ENOMEM;
-        retval = 0;
-        if (rock->fast_state->armor_key)
-            retval = krb5_copy_keyblock(kcontext, rock->fast_state->armor_key,
-                                        &key);
-        if (retval == 0) {
-            ret->data = (char *) key;
-            ret->length = key?sizeof(krb5_keyblock):0;
-            key = NULL;
-        }
-        if (retval == 0) {
-            *retdata = ret;
-            ret = NULL;
-        }
+    if (rock->as_key->length == 0) {
+        ret = (*rock->gak_fct)(context, rock->client, *rock->etype,
+                               rock->prompter, rock->prompter_data, rock->salt,
+                               rock->s2kparams, rock->as_key, *rock->gak_data);
         if (ret)
-            free(ret);
-        return retval;
+            return ret;
     }
-    case krb5_clpreauth_free_fast_armor:
-        ret = *retdata;
-        if (ret) {
-            if (ret->data)
-                krb5_free_keyblock(kcontext, (krb5_keyblock *) ret->data);
-            free(ret);
-            *retdata = NULL;
-        }
-        return 0;
-    default:
-        return EINVAL;
-    }
+    *keyblock = rock->as_key;
+    return 0;
 }
+
+static krb5_error_code
+set_as_key(krb5_context context, krb5_clpreauth_rock rock,
+           const krb5_keyblock *keyblock)
+{
+    krb5_free_keyblock_contents(context, rock->as_key);
+    return krb5_copy_keyblock_contents(context, keyblock, rock->as_key);
+}
+
+static struct krb5_clpreauth_callbacks_st callbacks = {
+    1,
+    get_etype,
+    fast_armor,
+    get_as_key,
+    set_as_key
+};
 
 /* Tweak the request body, for now adding any enctypes which the module claims
  * to add support for to the list, but in the future perhaps doing more
@@ -498,12 +459,7 @@ run_preauth_plugins(krb5_context kcontext,
                     krb5_pa_data *in_padata,
                     krb5_prompter_fct prompter,
                     void *prompter_data,
-                    krb5_clpreauth_get_as_key_fn gak_fct,
-                    krb5_data *salt,
-                    krb5_data *s2kparams,
-                    void *gak_data,
                     krb5_clpreauth_rock preauth_rock,
-                    krb5_keyblock *as_key,
                     krb5_pa_data ***out_pa_list,
                     int *out_pa_list_size,
                     int *module_ret,
@@ -544,12 +500,10 @@ run_preauth_plugins(krb5_context kcontext,
         ret = module->client_process(kcontext, module->moddata,
                                      *module->modreq_p,
                                      (krb5_get_init_creds_opt *)opte,
-                                     client_data_proc, preauth_rock,
+                                     &callbacks, preauth_rock,
                                      request, encoded_request_body,
                                      encoded_previous_request, in_padata,
-                                     prompter, prompter_data, gak_fct,
-                                     gak_data, salt, s2kparams, as_key,
-                                     &out_pa_data);
+                                     prompter, prompter_data, &out_pa_data);
         TRACE_PREAUTH_PROCESS(kcontext, module->name, module->pa_type,
                               module->flags, ret);
         /* Make note of the module's flags and status. */
@@ -628,82 +582,6 @@ pa_fx_cookie(krb5_context context, krb5_kdc_req *request,
     memcpy(contents, in_padata->contents, pa->length);
     *out_padata = pa;
     return 0;
-}
-
-static krb5_error_code
-pa_enc_timestamp(krb5_context context, krb5_kdc_req *request,
-                 krb5_pa_data *in_padata, krb5_pa_data **out_padata,
-                 krb5_data *salt, krb5_data *s2kparams, krb5_enctype *etype,
-                 krb5_keyblock *as_key, krb5_prompter_fct prompter,
-                 void *prompter_data, krb5_gic_get_as_key_fct gak_fct,
-                 void *gak_data)
-{
-    krb5_error_code ret;
-    krb5_pa_enc_ts pa_enc;
-    krb5_data *tmp;
-    krb5_enc_data enc_data;
-    krb5_pa_data *pa;
-
-    if (as_key->length == 0) {
-#ifdef DEBUG
-        fprintf (stderr, "%s:%d: salt len=%d", __FILE__, __LINE__,
-                 salt->length);
-        if ((int) salt->length > 0)
-            fprintf (stderr, " '%.*s'", salt->length, salt->data);
-        fprintf (stderr, "; *etype=%d request->ktype[0]=%d\n",
-                 *etype, request->ktype[0]);
-#endif
-        if ((ret = ((*gak_fct)(context, request->client,
-                               *etype ? *etype : request->ktype[0],
-                               prompter, prompter_data,
-                               salt, s2kparams, as_key, gak_data))))
-            return(ret);
-        TRACE_PREAUTH_ENC_TS_KEY_GAK(context, as_key);
-    }
-
-    /* now get the time of day, and encrypt it accordingly */
-
-    if ((ret = krb5_us_timeofday(context, &pa_enc.patimestamp, &pa_enc.pausec)))
-        return(ret);
-
-    if ((ret = encode_krb5_pa_enc_ts(&pa_enc, &tmp)))
-        return(ret);
-
-    ret = krb5_encrypt_helper(context, as_key,
-                              KRB5_KEYUSAGE_AS_REQ_PA_ENC_TS,
-                              tmp, &enc_data);
-    TRACE_PREAUTH_ENC_TS(context, pa_enc.patimestamp, pa_enc.pausec,
-                         tmp, &enc_data.ciphertext);
-
-    krb5_free_data(context, tmp);
-
-    if (ret) {
-        free(enc_data.ciphertext.data);
-        return(ret);
-    }
-
-    ret = encode_krb5_enc_data(&enc_data, &tmp);
-
-    free(enc_data.ciphertext.data);
-
-    if (ret)
-        return(ret);
-
-    if ((pa = (krb5_pa_data *) malloc(sizeof(krb5_pa_data))) == NULL) {
-        krb5_free_data(context, tmp);
-        return(ENOMEM);
-    }
-
-    pa->magic = KV5M_PA_DATA;
-    pa->pa_type = KRB5_PADATA_ENC_TIMESTAMP;
-    pa->length = tmp->length;
-    pa->contents = (krb5_octet *) tmp->data;
-
-    *out_padata = pa;
-
-    free(tmp);
-
-    return(0);
 }
 
 #if APPLE_PKINIT
@@ -1458,11 +1336,6 @@ static const pa_types_t pa_types[] = {
     },
 #endif /* APPLE_PKINIT */
     {
-        KRB5_PADATA_ENC_TIMESTAMP,
-        pa_enc_timestamp,
-        PA_REAL,
-    },
-    {
         KRB5_PADATA_SAM_CHALLENGE_2,
         pa_sam_2,
         PA_REAL,
@@ -1497,11 +1370,7 @@ krb5_do_preauth_tryagain(krb5_context kcontext,
                          krb5_pa_data **padata,
                          krb5_pa_data ***return_padata,
                          krb5_error *err_reply,
-                         krb5_data *salt, krb5_data *s2kparams,
-                         krb5_enctype *etype,
-                         krb5_keyblock *as_key,
                          krb5_prompter_fct prompter, void *prompter_data,
-                         krb5_gic_get_as_key_fct gak_fct, void *gak_data,
                          krb5_clpreauth_rock preauth_rock,
                          krb5_gic_opt_ext *opte)
 {
@@ -1536,16 +1405,13 @@ krb5_do_preauth_tryagain(krb5_context kcontext,
             if ((*module->client_tryagain)(kcontext, module->moddata,
                                            *module->modreq_p,
                                            (krb5_get_init_creds_opt *)opte,
-                                           client_data_proc,
-                                           preauth_rock,
+                                           &callbacks, preauth_rock,
                                            request,
                                            encoded_request_body,
                                            encoded_previous_request,
                                            padata[i],
                                            err_reply,
                                            prompter, prompter_data,
-                                           gak_fct, gak_data, salt, s2kparams,
-                                           as_key,
                                            &out_padata) == 0) {
                 if (out_padata != NULL) {
                     int k;
@@ -1563,17 +1429,12 @@ krb5_do_preauth_tryagain(krb5_context kcontext,
 }
 
 krb5_error_code KRB5_CALLCONV
-krb5_do_preauth(krb5_context context,
-                krb5_kdc_req *request,
+krb5_do_preauth(krb5_context context, krb5_kdc_req *request,
                 krb5_data *encoded_request_body,
                 krb5_data *encoded_previous_request,
                 krb5_pa_data **in_padata, krb5_pa_data ***out_padata,
-                krb5_data *salt, krb5_data *s2kparams,
-                krb5_enctype *etype,
-                krb5_keyblock *as_key,
                 krb5_prompter_fct prompter, void *prompter_data,
-                krb5_gic_get_as_key_fct gak_fct, void *gak_data,
-                krb5_clpreauth_rock preauth_rock, krb5_gic_opt_ext *opte)
+                krb5_clpreauth_rock rock, krb5_gic_opt_ext *opte)
 {
     unsigned int h;
     int i, j, out_pa_list_size;
@@ -1673,19 +1534,24 @@ krb5_do_preauth(krb5_context context,
                 }
                 scratch.data = (char *) etype_info[l]->salt;
                 scratch.length = etype_info[l]->length;
-                krb5_free_data_contents(context, salt);
+                krb5_free_data_contents(context, rock->salt);
                 if (scratch.length == KRB5_ETYPE_NO_SALT)
-                    salt->data = NULL;
-                else
-                    if ((ret = krb5int_copy_data_contents( context, &scratch, salt)) != 0)
+                    rock->salt->data = NULL;
+                else {
+                    ret = krb5int_copy_data_contents(context, &scratch,
+                                                     rock->salt);
+                    if (ret)
                         goto cleanup;
-                *etype = etype_info[l]->etype;
-                krb5_free_data_contents(context, s2kparams);
-                if ((ret = krb5int_copy_data_contents(context,
-                                                      &etype_info[l]->s2kparams,
-                                                      s2kparams)) != 0)
+                }
+                *rock->etype = etype_info[l]->etype;
+                krb5_free_data_contents(context, rock->s2kparams);
+                ret = krb5int_copy_data_contents(context,
+                                                 &etype_info[l]->s2kparams,
+                                                 rock->s2kparams);
+                if (ret)
                     goto cleanup;
-                TRACE_PREAUTH_ETYPE_INFO(context, *etype, salt, s2kparams);
+                TRACE_PREAUTH_ETYPE_INFO(context, *rock->etype, rock->salt,
+                                         rock->s2kparams);
                 break;
             }
             case KRB5_PADATA_PW_SALT:
@@ -1706,11 +1572,13 @@ krb5_do_preauth(krb5_context context,
 #endif
                         out_pa = NULL;
 
-                        if ((ret = ((*pa_types[j].fct)(context, request,
-                                                       in_padata[i], &out_pa,
-                                                       salt, s2kparams, etype, as_key,
-                                                       prompter, prompter_data,
-                                                       gak_fct, gak_data)))) {
+                        ret = pa_types[j].fct(context, request, in_padata[i],
+                                              &out_pa, rock->salt,
+                                              rock->s2kparams, rock->etype,
+                                              rock->as_key, prompter,
+                                              prompter_data, *rock->gak_fct,
+                                              *rock->gak_data);
+                        if (ret) {
                             if (paorder[h] == PA_INFO) {
                                 TRACE_PREAUTH_INFO_FAIL(context,
                                                         in_padata[i]->pa_type,
@@ -1749,11 +1617,7 @@ krb5_do_preauth(krb5_context context,
                                               in_padata[i],
                                               prompter,
                                               prompter_data,
-                                              gak_fct,
-                                              salt, s2kparams,
-                                              gak_data,
-                                              preauth_rock,
-                                              as_key,
+                                              rock,
                                               &out_pa_list,
                                               &out_pa_list_size,
                                               &module_ret,

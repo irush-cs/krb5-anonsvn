@@ -1109,9 +1109,12 @@ kg_accept_krb5(minor_status, context_handle,
             /* in order to force acceptor subkey to be used, don't set PROT_READY */
 
             /* Raw AP-REP is returned */
-            output_token->length = ap_rep.length;
-            output_token->value = ap_rep.data;
-            ap_rep.data = NULL; /* don't double free */
+            code = data_to_gss(&ap_rep, output_token);
+            if (code)
+            {
+                major_status = GSS_S_FAILURE;
+                goto fail;
+            }
 
             ctx->established = 0;
 
@@ -1128,7 +1131,7 @@ kg_accept_krb5(minor_status, context_handle,
 
         token.length = g_token_size(mech_used, ap_rep.length);
 
-        if ((token.value = (unsigned char *) xmalloc(token.length))
+        if ((token.value = (unsigned char *) gssalloc_malloc(token.length))
             == NULL) {
             major_status = GSS_S_FAILURE;
             code = ENOMEM;
@@ -1295,7 +1298,7 @@ done:
 }
 #endif /* LEAN_CLIENT */
 
-OM_uint32
+OM_uint32 KRB5_CALLCONV
 krb5_gss_accept_sec_context_ext(
     OM_uint32 *minor_status,
     gss_ctx_id_t *context_handle,

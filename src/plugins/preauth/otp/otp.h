@@ -28,18 +28,11 @@
 
 #include "k5-int.h"
 #include <krb5/krb5.h>
-#include <kdb.h>
 #include "adm_proto.h"          /* for krb5_klog_syslog */
 
-#ifdef DEBUG
-#include <syslog.h>             /* for LOG_* */
-#define SERVER_DEBUG(body, ...) krb5_klog_syslog(LOG_DEBUG, "OTP PA: "body, \
-                                                 ##__VA_ARGS__)
-#define CLIENT_DEBUG(body, ...) fprintf(stderr, "OTP PA: "body, ##__VA_ARGS__)
-#else
-#define SERVER_DEBUG(body, ...)
-#define CLIENT_DEBUG(body, ...)
-#endif
+void SERVER_DEBUG(errcode_t, const char *, ...);
+void CLIENT_DEBUG(const char *, ...);
+
 
 #define OTP_METHOD_CONTEXT(c) (c)->method->context
 
@@ -65,7 +58,6 @@ typedef char *(*get_config_func_t)(struct otp_server_ctx *otp_ctx,
    plugin is loaded.  */
 typedef int (*otp_server_init_func_t)(struct otp_server_ctx *context,
                                       get_config_func_t get_config,
-                                      search_db_func_t search_db,
                                       struct otp_method_ftable **ftable,
                                       void **method_context);
 /* Function for cleaning up after an OTP method.  Invoked when the OTP
@@ -105,6 +97,7 @@ struct otp_method {
 
 struct otp_client_ctx {
     char *otp;
+    char *token_id;
 };
 
 struct otp_server_ctx {
@@ -122,7 +115,4 @@ struct otp_req_ctx {
     struct otp_method *method;
     /** Opaque data blob passed to authentication method.  */
     char *blob;
-    /** Saved by otp_server_create_req_ctx() for later use by search_db().  */
-    /* FIXME: Not used, remove.*/
-    krb5_db_entry *client;
 };
