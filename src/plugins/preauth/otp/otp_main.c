@@ -683,6 +683,7 @@ otp_server_get_edata(krb5_context context,
     krb5_pa_otp_challenge otp_challenge;
     krb5_data *encoded_otp_challenge = NULL;
     struct otp_server_ctx *otp_ctx = (struct otp_server_ctx *) moddata;
+    struct otp_req_ctx *otp_req = NULL;
     krb5_timestamp now_sec;
     krb5_int32 now_usec;
 
@@ -700,6 +701,28 @@ otp_server_get_edata(krb5_context context,
     if (pa == NULL) {
         (*respond)(arg, ENOMEM, NULL);
         return;
+    }
+
+    retval = otp_server_create_req_ctx(otp_ctx, rock, NULL, cb, &otp_req);
+    if (retval != 0) {
+        SERVER_DEBUG(retval, "Unable to create request context for edata.");
+        (*respond)(arg, retval, NULL);
+        return;
+    }
+
+    /* Let the method set up the challenge (otp_service mainly) */
+    if (otp_req->method->ftable->server_challenge) {
+        retval = otp_req->method->ftable->server_challenge(otp_req,
+                                                           &otp_challenge);
+        if (retval != 0) {
+            SERVER_DEBUG(retval, "[%s] server_challenge failed.",
+                         otp_req->method->name);
+            (*respond)(arg, retval, NULL);
+            return;
+        }
+    } else {
+        SERVER_DEBUG("Method [%s] doesn't set a challenge.",
+                     otp_req->method->name);
     }
 
     /* Create nonce from random data + timestamp.  Length of random
@@ -753,6 +776,9 @@ otp_server_get_edata(krb5_context context,
     pa->contents = (krb5_octet *) encoded_otp_challenge->data;
     pa->length = encoded_otp_challenge->length;
 
+    if (otp_challenge.otp_service.length)
+        free(otp_challenge.otp_service.data);
+    otp_server_free_req_ctx(&otp_req);
     (*respond)(arg, retval, pa);
 }
 
