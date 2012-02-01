@@ -316,6 +316,7 @@ make_gss_checksum (krb5_context context, krb5_auth_context auth_context,
         /* Turn KRB5_AUTH_CONTEXT_DO_TIME back on and reset the send subkey. */
         krb5_auth_con_setflags(context, auth_context, con_flags);
         krb5_auth_con_setsendsubkey_k(context, auth_context, send_subkey);
+        krb5_k_free_key(context, send_subkey);
 
         if (code) {
             /* don't fail here; just don't accept/do the delegation
@@ -474,15 +475,14 @@ make_ap_req_v1(context, ctx, cred, k_cred, ad_context,
          * For DCE RPC, do not encapsulate the AP-REQ in the
          * typical GSS wrapping.
          */
-        token->length = ap_req.length;
-        token->value = ap_req.data;
-
-        ap_req.data = NULL; /* don't double free */
+        code = data_to_gss(&ap_req, token);
+        if (code)
+            goto cleanup;
     } else {
         /* allocate space for the token */
         tlen = g_token_size((gss_OID) mech_type, ap_req.length);
 
-        if ((t = (unsigned char *) xmalloc(tlen)) == NULL) {
+        if ((t = (unsigned char *) gssalloc_malloc(tlen)) == NULL) {
             code = ENOMEM;
             goto cleanup;
         }
@@ -879,8 +879,9 @@ mutual_auth(
         if (code)
             goto fail;
 
-        output_token->value = outbuf.data;
-        output_token->length = outbuf.length;
+        code = data_to_gss(&outbuf, output_token);
+        if (code)
+            goto fail;
     }
 
     /* set established */

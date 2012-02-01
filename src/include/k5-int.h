@@ -802,17 +802,39 @@ error(MIT_DES_KEYSIZE does not equal KRB5_MIT_DES_KEYSIZE)
 
 #include <krb5/preauth_plugin.h>
 
+typedef krb5_error_code
+(*krb5_gic_get_as_key_fct)(krb5_context, krb5_principal, krb5_enctype,
+                           krb5_prompter_fct, void *prompter_data,
+                           krb5_data *salt, krb5_data *s2kparams,
+                           krb5_keyblock *as_key, void *gak_data);
+
 #define CLIENT_ROCK_MAGIC 0x4352434b
-/* This structure is passed into the client preauth functions and passed
- * back to the "get_data_proc" function so that it can locate the
- * requested information.  It is opaque to the plugin code and can be
- * expanded in the future as new types of requests are defined which
- * may require other things to be passed through. */
+/*
+ * This structure is passed into the clpreauth methods and passed back to
+ * clpreauth callbacks so that they can locate the requested information.  It
+ * is opaque to the plugin code and can be expanded in the future as new types
+ * of requests are defined which may require other things to be passed through.
+ * All pointer fields are aliases and should not be freed.
+ */
 struct krb5int_fast_request_state;
 struct krb5_clpreauth_rock_st {
     krb5_magic magic;
     krb5_enctype *etype;
     struct krb5int_fast_request_state *fast_state;
+
+    /*
+     * These fields allow gak_fct to be called via the rock.  The
+     * gak_fct and gak_data fields have an extra level of indirection
+     * since they can change in the init_creds context.
+     */
+    krb5_keyblock *as_key;
+    krb5_gic_get_as_key_fct *gak_fct;
+    void **gak_data;
+    krb5_data *salt;
+    krb5_data *s2kparams;
+    krb5_principal client;
+    krb5_prompter_fct prompter;
+    void *prompter_data;
 };
 
 typedef struct _krb5_pa_enc_ts {
@@ -953,22 +975,23 @@ krb5int_find_pa_data(krb5_context, krb5_pa_data *const *, krb5_preauthtype);
 
 void krb5_free_etype_info(krb5_context, krb5_etype_info);
 
-typedef struct _krb5_otp_keyinfo {
+typedef struct _krb5_otp_tokeninfo {
     krb5_int32 flags;
     krb5_data otp_vendor;
-    krb5_data otp_challenge;
+    krb5_octet_data otp_challenge;
     krb5_int32 otp_length;
-    krb5_data otp_keyid;
-    krb5_data otp_algid;
-    krb5_algorithm_identifier hash_alg;
+    krb5_octet_data otp_token_id;
+    krb5_data otp_alg_id;
+    krb5_algorithm_identifier supported_hash_alg; /* FIXME: SEQUENCE OF */
+    /* krb5_int16 n_supported_hash_alg; */
     krb5_int32 iteration_count;
-} krb5_otp_keyinfo;
+} krb5_otp_tokeninfo;
 
 typedef struct _krb5_pa_otp_challenge {
     krb5_data nonce;
     krb5_data otp_service;
-    krb5_otp_keyinfo otp_keyinfo;
-    krb5_int32 n_otp_keyinfo;
+    krb5_otp_tokeninfo *otp_tokeninfo;
+    krb5_int32 n_otp_tokeninfo;
     krb5_data salt;
     krb5_data s2kparams;
 } krb5_pa_otp_challenge;
@@ -980,12 +1003,13 @@ typedef struct _krb5_pa_otp_req {
     krb5_algorithm_identifier hash_alg;
     krb5_int32 iteration_count;
     krb5_data otp_value;
+    krb5_data otp_pin;
     krb5_data otp_challenge;
+    krb5_timestamp otp_time;
     krb5_data otp_counter;
     krb5_int32 otp_format;
-    krb5_timestamp otp_time;
-    krb5_data otp_keyid;
-    krb5_data otp_algid;
+    krb5_data otp_token_id;
+    krb5_data otp_alg_id;
     krb5_data otp_vendor;
 } krb5_pa_otp_req;
 
@@ -1091,12 +1115,6 @@ krb5int_copy_data_contents_add0(krb5_context, const krb5_data *, krb5_data *);
 krb5_error_code
 krb5int_copy_creds_contents(krb5_context, const krb5_creds *, krb5_creds *);
 
-typedef krb5_error_code
-(*krb5_gic_get_as_key_fct)(krb5_context, krb5_principal, krb5_enctype,
-                           krb5_prompter_fct, void *prompter_data,
-                           krb5_data *salt, krb5_data *s2kparams,
-                           krb5_keyblock *as_key, void *gak_data);
-
 krb5_error_code KRB5_CALLCONV
 krb5int_get_init_creds(krb5_context context, krb5_creds *creds,
                        krb5_principal client, krb5_prompter_fct prompter,
@@ -1116,11 +1134,8 @@ krb5_error_code KRB5_CALLCONV
 krb5_do_preauth(krb5_context context, krb5_kdc_req *request,
                 krb5_data *encoded_request_body,
                 krb5_data *encoded_previous_request, krb5_pa_data **in_padata,
-                krb5_pa_data ***out_padata, krb5_data *salt,
-                krb5_data *s2kparams, krb5_enctype *etype,
-                krb5_keyblock *as_key, krb5_prompter_fct prompter,
-                void *prompter_data, krb5_gic_get_as_key_fct gak_fct,
-                void *gak_data, krb5_clpreauth_rock preauth_rock,
+                krb5_pa_data ***out_padata, krb5_prompter_fct prompter,
+                void *prompter_data, krb5_clpreauth_rock preauth_rock,
                 krb5_gic_opt_ext *opte);
 
 krb5_error_code KRB5_CALLCONV
@@ -1128,12 +1143,8 @@ krb5_do_preauth_tryagain(krb5_context context, krb5_kdc_req *request,
                          krb5_data *encoded_request_body,
                          krb5_data *encoded_previous_request,
                          krb5_pa_data **in_padata, krb5_pa_data ***out_padata,
-                         krb5_error *err_reply,
-                         krb5_data *salt, krb5_data *s2kparams,
-                         krb5_enctype *etype, krb5_keyblock *as_key,
-                         krb5_prompter_fct prompter, void *prompter_data,
-                         krb5_gic_get_as_key_fct gak_fct, void *gak_data,
-                         krb5_clpreauth_rock preauth_rock,
+                         krb5_error *err_reply, krb5_prompter_fct prompter,
+                         void *prompter_data, krb5_clpreauth_rock preauth_rock,
                          krb5_gic_opt_ext *opte);
 
 void KRB5_CALLCONV krb5_init_preauth_context(krb5_context);
@@ -1799,7 +1810,7 @@ krb5_error_code
 encode_krb5_ad_signedpath_data(const krb5_ad_signedpath_data *, krb5_data **);
 
 krb5_error_code
-encode_krb5_otp_keyinfo(const krb5_otp_keyinfo *, krb5_data **);
+encode_krb5_otp_tokeninfo(const krb5_otp_tokeninfo *, krb5_data **);
 
 krb5_error_code
 encode_krb5_pa_otp_challenge(const krb5_pa_otp_challenge *, krb5_data **);
@@ -2178,7 +2189,7 @@ void krb5int_free_srv_dns_data(struct srv_dns_entry *);
 /* To keep happy libraries which are (for now) accessing internal stuff */
 
 /* Make sure to increment by one when changing the struct */
-#define KRB5INT_ACCESS_STRUCT_VERSION 17
+#define KRB5INT_ACCESS_STRUCT_VERSION 18
 
 #ifndef ANAME_SZ
 struct ktext;                   /* from krb.h, for krb524 support */
@@ -2213,17 +2224,6 @@ typedef struct _krb5int_access {
     krb5_error_code
     (*asn1_ldap_decode_sequence_of_keys)(krb5_data *in,
                                          ldap_seqof_key_data **);
-
-    /* Used for encrypted challenge fast factor*/
-    krb5_error_code (*encode_enc_data)(const krb5_enc_data *, krb5_data **);
-    krb5_error_code (*decode_enc_data)(const krb5_data *, krb5_enc_data **);
-    void (KRB5_CALLCONV *free_enc_data)(krb5_context, krb5_enc_data *);
-    krb5_error_code (*encode_enc_ts)(const krb5_pa_enc_ts *, krb5_data **);
-    krb5_error_code (*decode_enc_ts)(const krb5_data *, krb5_pa_enc_ts **);
-    void (KRB5_CALLCONV *free_enc_ts)(krb5_context, krb5_pa_enc_ts *);
-    krb5_error_code
-    (*encrypt_helper)(krb5_context, const krb5_keyblock *, krb5_keyusage,
-                      const krb5_data *, krb5_enc_data *);
 
     /*
      * pkinit asn.1 encode/decode functions
@@ -2691,6 +2691,10 @@ krb5_error_code krb5_walk_realm_tree(krb5_context, const krb5_data *,
                                      int);
 
 krb5_error_code
+k5_client_realm_path(krb5_context context, const krb5_data *client,
+                     const krb5_data *server, krb5_data **rpath_out);
+
+krb5_error_code
 krb5_auth_con_set_safe_cksumtype(krb5_context, krb5_auth_context,
                                  krb5_cksumtype);
 
@@ -2842,15 +2846,6 @@ k5alloc(size_t len, krb5_error_code *code)
     *code = (ptr == NULL) ? ENOMEM : 0;
     return ptr;
 }
-
-krb5_error_code KRB5_CALLCONV
-krb5int_pac_sign(krb5_context context,
-                 krb5_pac pac,
-                 krb5_timestamp authtime,
-                 krb5_const_principal principal,
-                 const krb5_keyblock *server_key,
-                 const krb5_keyblock *privsvr_key,
-                 krb5_data *data);
 
 krb5_error_code KRB5_CALLCONV
 krb5_get_credentials_for_user(krb5_context context, krb5_flags options,

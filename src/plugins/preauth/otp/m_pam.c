@@ -39,6 +39,7 @@
 
 #include <errno.h>
 #include <security/pam_appl.h>
+#include <k5-int.h>
 
 #include "otp.h"
 #include "m_pam.h"
@@ -73,12 +74,14 @@ otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
     char* user = NULL;
     char* service = NULL;
     int retval = 0;
-    SERVER_DEBUG("[pam] otp_pam_verify_otp called.");
+    SERVER_DEBUG(0, "[pam] otp_pam_verify_otp called.");
 
+#if 0 /* in case otp_ctx->client will return... */
     if (otp_ctx->client == NULL) {
-        SERVER_DEBUG("[pam] don't know who the the client is.");
+        SERVER_DEBUG(ENOENT, "[pam] don't know who the the client is.");
         return 1;
     }
+#endif
 
     retval = otp_pam_get_user_service(otp_ctx, &user, &service);
     if (retval != 0) {
@@ -101,12 +104,14 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
     char* prompt = NULL;
     int retval = 0;
 
-    SERVER_DEBUG("[pam] otp_pam_challenge called.");
+    SERVER_DEBUG(0, "[pam] otp_pam_challenge called.");
 
+#if 0 /* in case otp_ctx->client will return... */
     if (ctx->client == NULL) {
-        SERVER_DEBUG("[pam] don't know who the the client is.");
+        SERVER_DEBUG(ENOENT, "[pam] don't know who the the client is.");
         return 1;
     }
+#endif
 
     retval = otp_pam_get_user_service(ctx, &user, &service);
     if (retval != 0) {
@@ -222,6 +227,7 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
     }
 
     if (*user == NULL) {
+#if 0 /* in case otp_ctx->client will return... */
         len = krb5_princ_name(ctx->krb5_context, ctx->client->princ)->length;
         if ((*user = calloc(1, len + 1)) == NULL) {
             retval = ENOMEM;
@@ -230,9 +236,14 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
         strncpy(*user,
                 krb5_princ_name(ctx->krb5_context, ctx->client->princ)->data,
                 len);
+#else
+        SERVER_DEBUG(ENOENT, "[pam] can't find pam user.");
+        goto error;
+#endif
     }
 
     if (*service == NULL) {
+#if 0 /* in case otp_ctx->client will return... */
         len = krb5_princ_realm(ctx->krb5_context, ctx->client->princ)->length;
         if ((*service = calloc(1, len + 1 + 5)) == NULL) {
             retval = ENOMEM;
@@ -242,9 +253,13 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
         strncat(*service,
                 krb5_princ_realm(ctx->krb5_context, ctx->client->princ)->data,
                 len);
+#else
+        SERVER_DEBUG(ENOENT, "[pam] can't find pam service.");
+        goto error;
+#endif
     }
 
-    SERVER_DEBUG("[pam] got user: %s, service: %s, from %s.", *user, *service,
+    SERVER_DEBUG(0, "[pam] got user: %s, service: %s, from %s.", *user, *service,
                  (blobsize > 0 ? "blob" : "principal"));
 
     if (str != NULL)
@@ -352,7 +367,7 @@ otp_pam_auth(char* user, char* service, const char* password, char** prompt)
     conv.appdata_ptr = &data;
 
     if ((pamres = pam_start(service, user, &conv, &pamh)) != PAM_SUCCESS) {
-        SERVER_DEBUG("[pam] pam_start(%s, %s, &conv, &pamh) = %i (%s)\n",
+        SERVER_DEBUG(0, "[pam] pam_start(%s, %s, &conv, &pamh) = %i (%s)\n",
                      service, user, pamres, pam_strerror(pamh, pamres));
         pam_end(pamh, pamres);
         return pamres;

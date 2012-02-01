@@ -35,6 +35,7 @@
 #include <krb5/preauth_plugin.h>
 #include <k5-platform.h>
 #include <k5-int-pkinit.h>
+#include <autoconf.h>
 #include <profile.h>
 #include "pkinit_accessor.h"
 
@@ -304,7 +305,6 @@ void init_krb5_auth_pack(krb5_auth_pack **in);
 void init_krb5_auth_pack_draft9(krb5_auth_pack_draft9 **in);
 void init_krb5_pa_pk_as_rep(krb5_pa_pk_as_rep **in);
 void init_krb5_pa_pk_as_rep_draft9(krb5_pa_pk_as_rep_draft9 **in);
-void init_krb5_typed_data(krb5_typed_data **in);
 void init_krb5_subject_pk_info(krb5_subject_pk_info **in);
 
 void free_krb5_pa_pk_as_req(krb5_pa_pk_as_req **in);

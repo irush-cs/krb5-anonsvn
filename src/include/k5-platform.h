@@ -958,8 +958,10 @@ vsnprintf(char *str, size_t size, const char *format, va_list args)
     va_copy(args_copy, args);
     length = _vscprintf(format, args_copy);
     va_end(args_copy);
-    if (size)
+    if (size > 0) {
         _vsnprintf(str, size, format, args);
+        str[size - 1] = '\0';
+    }
     return length;
 }
 static inline int
@@ -1029,6 +1031,11 @@ extern int asprintf(char **, const char *, ...)
 #ifndef HAVE_MKSTEMP
 extern int krb5int_mkstemp(char *);
 #define mkstemp krb5int_mkstemp
+#endif
+
+#ifndef HAVE_GETTIMEOFDAY
+extern int krb5int_gettimeofday(struct timeval *tp, void *ignore);
+#define gettimeofday krb5int_gettimeofday
 #endif
 
 extern void krb5int_zap(void *ptr, size_t len);
