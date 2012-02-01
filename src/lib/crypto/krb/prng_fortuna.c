@@ -114,9 +114,6 @@ struct fortuna_state
     unsigned int reseed_count;
     struct timeval last_reseed_time;
     unsigned int pool0_bytes;
-
-    /* Current pid as of last request, for fork safety. */
-    pid_t pid;
 };
 
 /*
@@ -346,7 +343,11 @@ accumulator_output(struct fortuna_state *st, unsigned char *dst, size_t len)
 
 static k5_mutex_t fortuna_lock = K5_MUTEX_PARTIAL_INITIALIZER;
 static struct fortuna_state main_state;
+#ifdef _WIN32
+static DWORD last_pid;
+#else
 static pid_t last_pid;
+#endif
 static krb5_boolean have_entropy = FALSE;
 
 int
@@ -360,7 +361,11 @@ k5_prng_init(void)
         return ret;
 
     init_state(&main_state);
+#ifdef _WIN32
+    last_pid = GetCurrentProcessId();
+#else
     last_pid = getpid();
+#endif
     if (k5_get_os_entropy(osbuf, sizeof(osbuf))) {
         generator_reseed(&main_state, osbuf, sizeof(osbuf));
         have_entropy = TRUE;
@@ -410,15 +415,21 @@ krb5_error_code KRB5_CALLCONV
 krb5_c_random_make_octets(krb5_context context, krb5_data *outdata)
 {
     krb5_error_code ret;
+#ifdef _WIN32
+    DWORD pid = GetCurrentProcessId();
+#else
     pid_t pid = getpid();
+#endif
     unsigned char pidbuf[4];
 
     ret = k5_mutex_lock(&fortuna_lock);
     if (ret)
         return ret;
 
-    if (!have_entropy)
+    if (!have_entropy) {
+        k5_mutex_unlock(&fortuna_lock);
         return KRB5_CRYPTO_INTERNAL;
+    }
 
     if (pid != last_pid) {
         /* We forked; make sure child's PRNG stream differs from parent's. */
