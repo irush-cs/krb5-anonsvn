@@ -19,12 +19,12 @@ SHLIB_EXPDEPS = \
 	$(TOPLIBD)/libk5crypto$(SHLIBEXT) \
 	$(TOPLIBD)/libkadm5srv_mit$(SHLIBEXT) \
 	$(TOPLIBD)/libkrb5$(SHLIBEXT)
-SHLIB_EXPLIBS= -lkrb5 -lcom_err -lk5crypto @otp_libs@ -lpam $(SUPPORT_LIB) $(LIBS)
+SHLIB_EXPLIBS= -lkrb5 -lcom_err -lk5crypto @otp_libs@ $(SUPPORT_LIB) $(LIBS)
 
 SHLIB_DIRS=-L$(TOPLIBD)
 SHLIB_RDIRS=$(KRB5_LIBDIR)
 STOBJLISTS=OBJS.ST
-STLIBOBJS= otp_main.o @otp_objs@ m_pam.o
+STLIBOBJS= otp_main.o @otp_objs@
 
 all-unix:: all-liblinks
 install-unix:: install-libs

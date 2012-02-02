@@ -103,7 +103,9 @@
 #if defined (OTP_PREAUTH_ENABLE_YKCLIENT)
 #include "m_ykclient.h"
 #endif
+#if defined (OTP_PREAUTH_ENABLE_PAM)
 #include "m_pam.h"
+#endif
 
 /* Configured OTP methods.  */
 struct otp_method otp_methods[] = {
@@ -113,7 +115,9 @@ struct otp_method otp_methods[] = {
 #if defined (OTP_PREAUTH_ENABLE_YKCLIENT)
     {"ykclient", otp_ykclient_server_init, 0, NULL, NULL},
 #endif
+#if defined (OTP_PREAUTH_ENABLE_PAM)
     {"pam", otp_pam_server_init, 0, NULL, NULL},
+#endif
     {NULL, NULL, 0, NULL, NULL}
 };
 
