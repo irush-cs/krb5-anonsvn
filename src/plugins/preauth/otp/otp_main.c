@@ -883,7 +883,8 @@ otp_server_verify_padata(krb5_context context,
         retval = ENOMEM;
         goto errout;
     }
-    SERVER_DEBUG(0, "Got OTP [%s].", otp);
+    /* dangerous with regular password instead of otp, even if just for debug */
+    // SERVER_DEBUG(0, "Got OTP [%s].", otp);
     if (otp_req->otp_token_id.data != NULL) {
         tokenid = strndup(otp_req->otp_token_id.data,
                           otp_req->otp_token_id.length);
