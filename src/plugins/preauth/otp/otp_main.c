@@ -279,7 +279,7 @@ otp_client_process(krb5_context context,
     krb5_pa_otp_challenge *otp_challenge = NULL;
     krb5_data encoded_otp_challenge;
     size_t size;
-    krb5_prompt prompt[1];
+    krb5_prompt prompt[1] = {{0,0,0}};
     int hidden = 0;
     char buffer[256];
     char* c;
@@ -355,21 +355,24 @@ otp_client_process(krb5_context context,
             CLIENT_DEBUG("Missing client context.\n");
         }
         else {
-//<<<<<<< HEAD
             if (otp_ctx->otp == NULL) {
-                if (otp_challenge->otp_service.length == 0) {
-                    prompt[0].prompt = "OTP";
-                    strcpy(buffer, "OTP");
-                } else {
-                    prompt[0].prompt = otp_challenge->otp_service.data;
-                    strncpy(buffer, otp_challenge->otp_service.data,
-                            sizeof(buffer));
-                    buffer[sizeof(buffer) - 1] = 0;
-                    c = buffer;
-                    while (*c != 0) {
-                        if (*c == ' ') *c = '_';
-                        ++c;
-                    }
+                /* Copy prompt to prompt[0] and to buffer. */
+                strncpy(buffer, otp_challenge->otp_service.length == 0 ?
+                        "OTP" : otp_challenge->otp_service.data,
+                        sizeof(buffer) - 1);
+                buffer[otp_challenge->otp_service.length == 0 ? 3 :
+                       otp_challenge->otp_service.length] = 0;
+                prompt[0].prompt = strdup(buffer);
+                if (prompt[0].prompt == NULL) {
+                    retval = ENOMEM;
+                    goto errout;
+                }
+
+                /* Check if otp should be echoed. */
+                c = buffer;
+                while (*c != 0) {
+                    if (*c == ' ') *c = '_';
+                    ++c;
                 }
                 if (profile_get_boolean(context->profile,
                                         KRB5_CONF_LIBDEFAULTS,
@@ -392,7 +395,6 @@ otp_client_process(krb5_context context,
                 prompt[0].reply->length = 64;
                 prompt[0].reply->data = calloc(1, 64);
                 if (prompt[0].reply->data == NULL) {
-                    free(prompt[0].reply);
                     retval = ENOMEM;
                     goto errout;
                 }
@@ -403,6 +405,9 @@ otp_client_process(krb5_context context,
 #endif
                 otp_ctx->otp = prompt[0].reply->data;
                 free(prompt[0].reply);
+                free(prompt[0].prompt);
+                prompt[0].reply = NULL;
+                prompt[0].prompt = NULL;
             }
 #ifdef DEBUG
             if (strlen(otp_ctx->otp) == 0) {
@@ -443,6 +448,10 @@ otp_client_process(krb5_context context,
     return 0;
 
  errout:
+    if (prompt[0].prompt != NULL)
+        free(prompt[0].prompt);
+    if (prompt[0].reply != NULL)
+        free(prompt[0].reply);
     free(pa_array);
     free(pa);
     return retval;
