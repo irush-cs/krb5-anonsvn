@@ -70,7 +70,7 @@ typedef int (*otp_server_verify_func_t)(const struct otp_req_ctx *req_ctx,
 
 /* Function to set up the challange to be sent to the client. */
 typedef int (*otp_server_challenge_func_t)(const struct otp_req_ctx *ctx,
-                                           krb5_pa_otp_challenge *challenge);
+                                           krb5_otp_tokeninfo *tokeninfo);
 
 struct otp_tlv {
     unsigned int type;

@@ -707,28 +707,6 @@ otp_server_get_edata(krb5_context context,
         return;
     }
 
-    retval = otp_server_create_req_ctx(otp_ctx, rock, NULL, cb, &otp_req);
-    if (retval != 0) {
-        SERVER_DEBUG(retval, "Unable to create request context for edata.");
-        (*respond)(arg, retval, NULL);
-        return;
-    }
-
-    /* Let the method set up the challenge (otp_service mainly) */
-    if (otp_req->method->ftable->server_challenge) {
-        retval = otp_req->method->ftable->server_challenge(otp_req,
-                                                           &otp_challenge);
-        if (retval != 0) {
-            SERVER_DEBUG(retval, "[%s] server_challenge failed.",
-                         otp_req->method->name);
-            (*respond)(arg, retval, NULL);
-            return;
-        }
-    } else {
-        SERVER_DEBUG("Method [%s] doesn't set a challenge.",
-                     otp_req->method->name);
-    }
-
     /* Create nonce from random data + timestamp.  Length of random
        data equals the length of the server key.  The timestamp is 4
        octets current time, seconds since the epoch and 4 bytes
@@ -763,8 +741,28 @@ otp_server_get_edata(krb5_context context,
         (*respond)(arg,  ENOMEM, NULL);
         return;
     }
-    /* TODO: Delegate to otp methods to decide on the flags.  */
-    otp_challenge.otp_tokeninfo[0].flags = 0;
+
+    retval = otp_server_create_req_ctx(otp_ctx, rock, NULL, cb, &otp_req);
+    if (retval != 0) {
+        SERVER_DEBUG(retval, "Unable to create request context for edata.");
+        (*respond)(arg, retval, NULL);
+        return;
+    }
+
+    /* Let the method set up a challenge (the tokeninfo) */
+    if (otp_req->method->ftable->server_challenge) {
+        retval = otp_req->method->ftable->server_challenge(otp_req,
+                                                           &otp_challenge.otp_tokeninfo[0]);
+        if (retval != 0) {
+            SERVER_DEBUG(retval, "[%s] server_challenge failed.",
+                         otp_req->method->name);
+            (*respond)(arg, retval, NULL);
+            return;
+        }
+    } else {
+        SERVER_DEBUG(0, "Method [%s] doesn't set a challenge.",
+                     otp_req->method->name);
+    }
 
     /* Encode challenge.  */
     retval = encode_krb5_pa_otp_challenge(&otp_challenge,
