@@ -97,7 +97,7 @@ otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
 
 static int
 otp_pam_challenge(const struct otp_req_ctx *ctx,
-                  krb5_pa_otp_challenge *challenge)
+                  krb5_otp_tokeninfo *tokeninfo)
 {
     char* user = NULL;
     char* service = NULL;
@@ -125,11 +125,11 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
         goto out;
     }
 
-    if (challenge->otp_service.length != 0)
-        free(challenge->otp_service.data);
+    if (tokeninfo->otp_vendor.length != 0)
+        free(tokeninfo->otp_vendor.data);
 
-    challenge->otp_service.data = prompt;
-    challenge->otp_service.length = strlen(prompt);
+    tokeninfo->otp_vendor.data = prompt;
+    tokeninfo->otp_vendor.length = strlen(prompt);
 
  out:
     free(user);
