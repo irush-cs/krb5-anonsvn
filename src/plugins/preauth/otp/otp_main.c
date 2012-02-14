@@ -356,12 +356,25 @@ otp_client_process(krb5_context context,
         }
         else {
             if (otp_ctx->otp == NULL) {
-                /* Copy prompt to prompt[0] and to buffer. */
-                strncpy(buffer, otp_challenge->otp_service.length == 0 ?
-                        "OTP" : otp_challenge->otp_service.data,
-                        sizeof(buffer) - 1);
-                buffer[otp_challenge->otp_service.length == 0 ? 3 :
-                       otp_challenge->otp_service.length] = 0;
+                /*
+                  If we have otp_vendor, it will be the prompt and the
+                  otp_service will be the banner. Otherwise the otp_service
+                  will be the prompt.
+                */
+
+                /* FIXME: Find a way to select between several tokeninfo's. */
+                memset(buffer, 0, sizeof(buffer));
+                if (otp_challenge->n_otp_tokeninfo > 0 &&
+                    otp_challenge->otp_tokeninfo[0].otp_vendor.length > 0) {
+                    strncpy(buffer,
+                            otp_challenge->otp_tokeninfo[0].otp_vendor.data,
+                            sizeof(buffer) - 1);
+                } else if (otp_challenge->otp_service.length > 0) {
+                    strncpy(buffer, otp_challenge->otp_service.data,
+                            sizeof(buffer) - 1);
+                } else {
+                    strcpy(buffer, "OTP");
+                }
                 prompt[0].prompt = strdup(buffer);
                 if (prompt[0].prompt == NULL) {
                     retval = ENOMEM;
@@ -398,11 +411,19 @@ otp_client_process(krb5_context context,
                     retval = ENOMEM;
                     goto errout;
                 }
-#ifdef DEBUG
-                prompter(context, prompter_data, "Name", "Banner", 1, prompt);
-#else
-                prompter(context, prompter_data, NULL, NULL, 1, prompt);
-#endif
+
+                if (otp_challenge->n_otp_tokeninfo > 0 &&
+                    otp_challenge->otp_tokeninfo[0].otp_vendor.length > 0 &&
+                    otp_challenge->otp_service.length > 0) {
+                    memset(buffer, 0, sizeof(buffer));
+                    strncpy(buffer, otp_challenge->otp_service.data,
+                            sizeof(buffer) - 1);
+                } else {
+                    buffer[0] = 0;
+                }
+                prompter(context, prompter_data, NULL,
+                         buffer[0] ? buffer : NULL, 1, prompt);
+
                 otp_ctx->otp = prompt[0].reply->data;
                 free(prompt[0].reply);
                 free(prompt[0].prompt);
