@@ -281,8 +281,9 @@ otp_client_process(krb5_context context,
     size_t size;
     krb5_prompt prompt[1] = {{0,0,0}};
     int hidden = 0;
-    char buffer[256];
+    char* buffer = NULL;
     char* c;
+    krb5_data *data = NULL;
 
     /* Use FAST armor key as response key.  */
     as_key = cb->fast_armor(context, rock);
@@ -363,17 +364,25 @@ otp_client_process(krb5_context context,
                 */
 
                 /* FIXME: Find a way to select between several tokeninfo's. */
-                memset(buffer, 0, sizeof(buffer));
                 if (otp_challenge->n_otp_tokeninfo > 0 &&
                     otp_challenge->otp_tokeninfo[0].otp_vendor.length > 0) {
-                    strncpy(buffer,
-                            otp_challenge->otp_tokeninfo[0].otp_vendor.data,
-                            sizeof(buffer) - 1);
+                    data = &otp_challenge->otp_tokeninfo[0].otp_vendor;
                 } else if (otp_challenge->otp_service.length > 0) {
-                    strncpy(buffer, otp_challenge->otp_service.data,
-                            sizeof(buffer) - 1);
+                    data = &otp_challenge->otp_service;
                 } else {
-                    strcpy(buffer, "OTP");
+                    buffer = strdup("OTP");
+                    if (buffer == NULL) {
+                        retval = ENOMEM;
+                        goto errout;
+                    }
+                }
+                if (data != NULL) {
+                    buffer = calloc(1, data->length + 1);
+                    if (buffer == NULL) {
+                        retval = ENOMEM;
+                        goto errout;
+                    }
+                    memcpy(buffer, data->data, data->length);
                 }
                 prompt[0].prompt = strdup(buffer);
                 if (prompt[0].prompt == NULL) {
@@ -469,6 +478,8 @@ otp_client_process(krb5_context context,
     return 0;
 
  errout:
+    if (buffer != NULL)
+        free(buffer);
     if (prompt[0].prompt != NULL)
         free(prompt[0].prompt);
     if (prompt[0].reply != NULL)
