@@ -69,15 +69,24 @@
   OTP_TOKENID is provided, the first token id found is being used.
 
   If OTP is not passed to the client by other means (gic), the standard
-  prompter is used with the otp_service as prompt (excluding trailing spaces
-  and semicolons). The otp_hidden subsection in krb5.conf (in the libdefaults
-  section) can be used to specify which otp_service will have a hidden prompt
-  (echo password). e.g.
+  prompter is used with the otp_service and/or otp_vendor as prompt (excluding
+  trailing spaces and semicolons). The otp_hidden option in krb5.conf can be
+  used to specify which otp_service will have a hidden prompt (echo
+  password). The option can come either in libdefaults or inside the realms
+  sections, and can be either boolean or a section with per prompt option. e.g.
 
       [libdefaults]
+          ...
           otp_hidden = {
               My_OTP = false
               OTP_Password = true
+          }
+
+      [realms]
+          ...
+          MY.REALM = {
+              ...
+              otp_hidden = false
           }
 
   This should be set on the client machine configuration.
@@ -396,18 +405,9 @@ otp_client_process(krb5_context context,
                     if (*c == ' ') *c = '_';
                     ++c;
                 }
-                if (profile_get_boolean(context->profile,
-                                        KRB5_CONF_LIBDEFAULTS,
-                                        "otp_hidden",
-                                        buffer,
-                                        0, &hidden) != 0) {
-                    CLIENT_DEBUG("%s: profile_get_boolean error: %d.", __func__,
-                                 retval);
-                } else {
-                    CLIENT_DEBUG("profile_get_boolean(%s, %s, %s) = %i\n",
-                                 KRB5_CONF_LIBDEFAULTS, "otp_hidden", buffer,
-                                 hidden);
-                }
+                hidden = otp_profile_get_hidden(context->profile, buffer, krb5_princ_realm(ctx->krb5_context, request->client));
+                CLIENT_DEBUG("otp_profile_get_hidden(%s) = %i\n", buffer, hidden);
+
                 prompt[0].hidden = hidden;
                 prompt[0].reply = calloc(1, sizeof(krb5_data));
                 if (prompt[0].reply == NULL) {
