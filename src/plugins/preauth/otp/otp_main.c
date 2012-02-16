@@ -91,6 +91,18 @@
 
   This should be set on the client machine configuration.
 
+  The otp_service can be set on the server either on the libdefaults section or
+  in a specific realm, using the otp_service configuration string. e.g.
+
+      [libdefaults]
+          ...
+          otp_service = Default OTP Service
+
+      [realms]
+          MY.REALM = {
+              ...
+              otp_service = MY.REALM OTP Service
+
  */
 
 #include <stdbool.h>
@@ -421,17 +433,17 @@ otp_client_process(krb5_context context,
                     goto errout;
                 }
 
+                free(buffer);
                 if (otp_challenge->n_otp_tokeninfo > 0 &&
                     otp_challenge->otp_tokeninfo[0].otp_vendor.length > 0 &&
                     otp_challenge->otp_service.length > 0) {
-                    memset(buffer, 0, sizeof(buffer));
-                    strncpy(buffer, otp_challenge->otp_service.data,
-                            sizeof(buffer) - 1);
+                    buffer = calloc(1, otp_challenge->otp_service.length + 1);
+                    memcpy(buffer, otp_challenge->otp_service.data, otp_challenge->otp_service.length);
                 } else {
-                    buffer[0] = 0;
+                    buffer = NULL;
                 }
                 prompter(context, prompter_data, NULL,
-                         buffer[0] ? buffer : NULL, 1, prompt);
+                         buffer, 1, prompt);
 
                 otp_ctx->otp = prompt[0].reply->data;
                 free(prompt[0].reply);
@@ -849,6 +861,12 @@ otp_server_get_edata(krb5_context context,
         (*respond)(arg,  ENOMEM, NULL);
         return;
     }
+
+    /* Get the otp_service */
+    otp_challenge.otp_service.data = otp_profile_get_service(context->profile, krb5_princ_realm(context, request->client));
+    if (otp_challenge.otp_service.data != NULL)
+        otp_challenge.otp_service.length = strlen(otp_challenge.otp_service.data);
+
     /* TODO: Delegate to otp methods to decide on the flags.  */
     otp_challenge.otp_tokeninfo[0].flags = 0;
 

@@ -142,3 +142,58 @@ otp_profile_get_hidden(profile_t profile,
 
     return result;
 }
+
+
+char*
+otp_profile_get_service(profile_t profile,
+                        const krb5_data *realm) {
+
+    const char *names[2][5];
+    krb5_error_code retval;
+    char **nameval = NULL;
+    char* result = NULL;
+    int n_names = 0;
+    int i;
+    char realmstr[1024];
+
+    if (realm != NULL) {
+        if (realm->length < sizeof(realmstr)) {
+            strncpy(realmstr, realm->data, realm->length);
+            realmstr[realm->length] = '\0';
+        }
+    } else {
+        realmstr[0] = 0;
+    }
+
+    /*
+      realms -> <realm> -> otp_service
+      libdefaults -> otp_service
+    */
+
+    if (realmstr[0] != 0) {
+        names[n_names][0] = KRB5_CONF_REALMS;
+        names[n_names][1] = realmstr;
+        names[n_names][2] = "otp_service";
+        names[n_names][3] = 0;
+        n_names++;
+    }
+    names[n_names][0] = KRB5_CONF_LIBDEFAULTS;
+    names[n_names][1] = "otp_service";
+    names[n_names][2] = 0;
+    n_names++;
+
+    for (i = 0; i < n_names; i++) {
+        retval = profile_get_values(profile, names[i], &nameval);
+
+        if (retval == 0 && nameval) {
+            if (nameval[0]) {
+                result = strdup(nameval[0]);
+                profile_free_list(nameval);
+                break;
+            }
+            profile_free_list(nameval);
+        }
+    }
+
+    return result;
+}
