@@ -823,7 +823,9 @@ otp_server_verify_padata(krb5_context context,
     }
 
     /* Verify the server nonce (PA-OTP-ENC-REQUEST).  */
-    if (decrypted_data.length != 8 + armor_key->length) {
+    /* For some enctypes, the resulting output->length may include padding
+       bytes, so we need < instead of != */
+    if (decrypted_data.length < 8 + armor_key->length) {
         retval = EINVAL;
         SERVER_DEBUG(retval, "Invalid server nonce length.");
         goto errout;
