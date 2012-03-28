@@ -394,21 +394,21 @@ otp_client_process(krb5_context context,
                     buffer = strdup("OTP");
                     if (buffer == NULL) {
                         retval = ENOMEM;
-                        goto errout;
+                        goto cleanup;
                     }
                 }
                 if (data != NULL) {
                     buffer = calloc(1, data->length + 1);
                     if (buffer == NULL) {
                         retval = ENOMEM;
-                        goto errout;
+                        goto cleanup;
                     }
                     memcpy(buffer, data->data, data->length);
                 }
                 prompt[0].prompt = strdup(buffer);
                 if (prompt[0].prompt == NULL) {
                     retval = ENOMEM;
-                    goto errout;
+                    goto cleanup;
                 }
 
                 /* Check if otp should be echoed. */
@@ -424,13 +424,13 @@ otp_client_process(krb5_context context,
                 prompt[0].reply = calloc(1, sizeof(krb5_data));
                 if (prompt[0].reply == NULL) {
                     retval = ENOMEM;
-                    goto errout;
+                    goto cleanup;
                 }
                 prompt[0].reply->length = 64;
                 prompt[0].reply->data = calloc(1, 64);
                 if (prompt[0].reply->data == NULL) {
                     retval = ENOMEM;
-                    goto errout;
+                    goto cleanup;
                 }
 
                 free(buffer);
@@ -479,7 +479,6 @@ otp_client_process(krb5_context context,
             goto cleanup;
         }
         memcpy(pa->contents, encoded_otp_req->data, pa->length);
-
         pa->pa_type = KRB5_PADATA_OTP_REQUEST;
 
         pa_array[0] = pa;
