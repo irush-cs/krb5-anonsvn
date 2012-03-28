@@ -376,6 +376,7 @@ otp_pam_auth(char* user, char* service, const char* password, char** prompt)
 
     if (data.prompt != NULL && prompt != NULL) {
         *prompt = data.prompt;
+        data.prompt = NULL;
         for (i = strlen(*prompt) - 1; i >= 0; i--) {
             switch ((*prompt)[i]) {
               case ' ':
@@ -389,6 +390,8 @@ otp_pam_auth(char* user, char* service, const char* password, char** prompt)
             }
         }
     }
+    if (data.prompt != NULL)
+        free(data.prompt);
 
     pam_end(pamh, pamres);
     return pamres;
