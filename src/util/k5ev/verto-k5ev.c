@@ -22,8 +22,11 @@
  * SOFTWARE.
  */
 
-/* An edited version of verto's verto-libev.c, using an embedded libev with
- * renamed symbols. */
+/*
+ * An edited version of verto-libev.c, using an embedded libev with renamed
+ * symbols.  The corresponding version of verto-libev.c is stored in this
+ * directory for reference, although it is not built here.
+ */
 
 #include <stdlib.h>
 #include <string.h>
@@ -44,33 +47,45 @@
 #define EV_USE_SELECT 1
 #include "ev.c"
 
+static verto_mod_ctx *
+k5ev_ctx_new(void)
+{
+    return ev_loop_new(EVFLAG_AUTO);
+}
+
+static verto_mod_ctx *
+k5ev_ctx_default(void)
+{
+    return ev_default_loop(EVFLAG_AUTO);
+}
+
 static void
-k5ev_ctx_free(void *ctx)
+k5ev_ctx_free(verto_mod_ctx *ctx)
 {
     if (ctx != EV_DEFAULT)
         ev_loop_destroy(ctx);
 }
 
 static void
-k5ev_ctx_run(void *ctx)
+k5ev_ctx_run(verto_mod_ctx *ctx)
 {
     ev_run(ctx, 0);
 }
 
 static void
-k5ev_ctx_run_once(void *ctx)
+k5ev_ctx_run_once(verto_mod_ctx *ctx)
 {
     ev_run(ctx, EVRUN_ONCE);
 }
 
 static void
-k5ev_ctx_break(void *ctx)
+k5ev_ctx_break(verto_mod_ctx *ctx)
 {
     ev_break(ctx, EVBREAK_ONE);
 }
 
 static void
-k5ev_ctx_reinitialize(void *ctx)
+k5ev_ctx_reinitialize(verto_mod_ctx *ctx)
 {
     ev_loop_fork(ctx);
 }
@@ -84,26 +99,29 @@ libev_callback(EV_P_ ev_watcher *w, int revents)
     verto_fire(w->data);
 }
 
-#define setuptype(type, priv, ...) \
-    type ## w = malloc(sizeof(ev_ ## type)); \
-    if (!type ## w) \
-        return NULL; \
-    ev_ ## type ## _init(type ## w, (EV_CB(type, (*))) __VA_ARGS__); \
-    type ## w->data = (void *) priv; \
-    ev_ ## type ## _start(ctx, type ## w); \
-    return type ## w
+#define setuptype(type, ...) \
+    w.type = malloc(sizeof(ev_ ## type)); \
+    if (w.type) { \
+    	ev_ ## type ## _init(w.type, (EV_CB(type, (*))) __VA_ARGS__); \
+    	ev_ ## type ## _start(ctx, w.type); \
+    } \
+    break
 
-static void *
-k5ev_ctx_add(void *ctx, const verto_ev *ev, verto_ev_flag *flags)
+static verto_mod_ev *
+k5ev_ctx_add(verto_mod_ctx *ctx, const verto_ev *ev, verto_ev_flag *flags)
 {
-    ev_io *iow = NULL;
-    ev_timer *timerw = NULL;
-    ev_idle *idlew = NULL;
-    ev_signal *signalw = NULL;
-    ev_child *childw = NULL;
+    union {
+       ev_watcher *watcher;
+       ev_io *io;
+       ev_timer *timer;
+       ev_idle *idle;
+       ev_signal *signal;
+       ev_child *child;
+    } w;
     ev_tstamp interval;
     int events = EV_NONE;
 
+    w.watcher = NULL;
     *flags |= VERTO_EV_FLAG_PERSIST;
     switch (verto_get_type(ev)) {
         case VERTO_EV_TYPE_IO:
@@ -111,49 +129,51 @@ k5ev_ctx_add(void *ctx, const verto_ev *ev, verto_ev_flag *flags)
                 events |= EV_READ;
             if (verto_get_flags(ev) & VERTO_EV_FLAG_IO_WRITE)
                 events |= EV_WRITE;
-            setuptype(io, ev, libev_callback, verto_get_fd(ev), events);
+            setuptype(io, libev_callback, verto_get_fd(ev), events);
         case VERTO_EV_TYPE_TIMEOUT:
             interval = ((ev_tstamp) verto_get_interval(ev)) / 1000.0;
-            setuptype(timer, ev, libev_callback, interval, interval);
+            setuptype(timer, libev_callback, interval, interval);
         case VERTO_EV_TYPE_IDLE:
-            setuptype(idle, ev, libev_callback);
+            setuptype(idle, libev_callback);
         case VERTO_EV_TYPE_SIGNAL:
-            setuptype(signal, ev, libev_callback, verto_get_signal(ev));
+            setuptype(signal, libev_callback, verto_get_signal(ev));
         case VERTO_EV_TYPE_CHILD:
             *flags &= ~VERTO_EV_FLAG_PERSIST; /* Child events don't persist */
-            setuptype(child, ev, libev_callback, verto_get_proc(ev), 0);
+            setuptype(child, libev_callback, verto_get_proc(ev), 0);
         default:
-            return NULL; /* Not supported */
+            break; /* Not supported */
     }
+
+    if (w.watcher)
+        w.watcher->data = (void*) ev;
+    return w.watcher;
 }
 
 static void
-k5ev_ctx_del(void *ctx, const verto_ev *ev, void *evpriv)
+k5ev_ctx_del(verto_mod_ctx *ctx, const verto_ev *ev, verto_mod_ev *evpriv)
 {
     switch (verto_get_type(ev)) {
         case VERTO_EV_TYPE_IO:
-            ev_io_stop(ctx, evpriv);
-	    break;
+            ev_io_stop(ctx, (ev_io*) evpriv);
+            break;
         case VERTO_EV_TYPE_TIMEOUT:
-            ev_timer_stop(ctx, evpriv);
-	    break;
+            ev_timer_stop(ctx, (ev_timer*) evpriv);
+            break;
         case VERTO_EV_TYPE_IDLE:
-            ev_idle_stop(ctx, evpriv);
-	    break;
+            ev_idle_stop(ctx, (ev_idle*) evpriv);
+            break;
         case VERTO_EV_TYPE_SIGNAL:
-            ev_signal_stop(ctx, evpriv);
-	    break;
+            ev_signal_stop(ctx, (ev_signal*) evpriv);
+            break;
         case VERTO_EV_TYPE_CHILD:
-            ev_child_stop(ctx, evpriv);
-	    break;
+            ev_child_stop(ctx, (ev_child*) evpriv);
+            break;
         default:
             break;
     }
 
     free(evpriv);
 }
-
-static verto_ctx *verto_convert_k5ev(struct ev_loop* loop);
 
 VERTO_MODULE(k5ev, NULL,
              VERTO_EV_TYPE_IO |
@@ -163,20 +183,7 @@ VERTO_MODULE(k5ev, NULL,
              VERTO_EV_TYPE_CHILD);
 
 verto_ctx *
-verto_new_k5ev(void)
-{
-    return verto_convert_k5ev(ev_loop_new(EVFLAG_AUTO));
-}
-
-verto_ctx *
-verto_default_k5ev(void)
-{
-    return verto_convert_k5ev(ev_default_loop(EVFLAG_AUTO));
-}
-
-/* Don't export this since our underlying libev is hidden. */
-static verto_ctx *
 verto_convert_k5ev(struct ev_loop* loop)
 {
-    return verto_convert(k5ev, loop);
+    return verto_convert(k5ev, 0, loop);
 }

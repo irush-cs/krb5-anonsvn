@@ -18,10 +18,21 @@ struct _krb5_init_creds_context {
     unsigned int loopcount;
     krb5_data password;
     krb5_error *err_reply;
+    krb5_pa_data **err_padata;
     krb5_creds cred;
     krb5_kdc_req *request;
     krb5_kdc_rep *reply;
-    krb5_data *encoded_request_body;
+    /**
+     * Stores the outer request body in order to feed into FAST for
+     * checksumming.  This is maintained even if FAST is not used. This is not
+     * used for preauth: that requires the inner request body.  For AS-only
+     * FAST it would be better for krb5int_fast_prep_req() to simply generate
+     * this.  However for TGS FAST, the client needs to supply the
+     * to_be_checksummed data. Whether this should be refactored should be
+     * revisited as TGS fast is integrated.
+     */
+    krb5_data *outer_request_body;
+    krb5_data *inner_request_body; /**< For preauth */
     krb5_data *encoded_previous_request;
     struct krb5int_fast_request_state *fast_state;
     krb5_pa_data **preauth_to_use;
@@ -33,6 +44,7 @@ struct _krb5_init_creds_context {
     krb5_boolean enc_pa_rep_permitted;
     krb5_boolean have_restarted;
     krb5_boolean sent_nontrivial_preauth;
+    krb5_boolean preauth_required;
 };
 
 krb5_error_code

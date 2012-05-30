@@ -3844,6 +3844,27 @@ krb5_copy_authdata(krb5_context context,
                    krb5_authdata *const *in_authdat, krb5_authdata ***out);
 
 /**
+ * Find authorization data elements.
+ *
+ * @param [in]  context         Library context
+ * @param [in]  ticket_authdata Authorization data list from ticket
+ * @param [in]  ap_req_authdata Authorization data list from AP request
+ * @param [in]  ad_type         Authorization data type to find
+ * @param [out] results         List of matching entries
+ *
+ * This function searches @a ticket_authdata and @a ap_req_authdata for
+ * elements of type @a ad_type.  Either input list may be NULL, in which case
+ * it will not be searched; otherwise, the input lists must be terminated by
+ * NULL entries.  This function will search inside AD-IF-RELEVANT containers if
+ * found in either list.  Use krb5_free_authdata() to free @a results when it
+ * is no longer needed.
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_find_authdata(krb5_context context, krb5_authdata *const *ticket_authdata,
+                   krb5_authdata *const *ap_req_authdata,
+                   krb5_authdatatype ad_type, krb5_authdata ***results);
+
+/**
  * Merge two authorization data lists into a new list.
  *
  * @param [in]  context         Library context
@@ -4727,6 +4748,21 @@ krb5_us_timeofday(krb5_context context,
  */
 krb5_error_code KRB5_CALLCONV
 krb5_timeofday(krb5_context context, register krb5_timestamp *timeret);
+
+/**
+ * Check if a timestamp is within the allowed clock skew of the current time.
+ *
+ * @param [in]     context      Library context
+ * @param [in]     date         Timestamp to check
+ *
+ * This function checks if @a date is close enough to the current time
+ * according to the configured allowable clock skew.
+ *
+ * @retval 0 Success
+ * @retval KRB5KRB_AP_ERR_SKEW @a date is not within allowable clock skew
+ */
+krb5_error_code KRB5_CALLCONV
+krb5_check_clockskew(krb5_context context, krb5_timestamp date);
 
 /**
  * Return all interface addresses for this host.

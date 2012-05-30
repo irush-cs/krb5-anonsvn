@@ -242,10 +242,14 @@ typedef krb5_error_code
                              krb5_pa_data ***pa_data_out);
 
 /*
- * Optional: Attempt to use e-data in the error response to try to recover from
- * the given error.  If this function is provided, and it stores data in
- * pa_data_out which is different data from the contents of pa_data_in, then
- * the client library will retransmit the request.
+ * Optional: Attempt to use error and error_padata to try to recover from the
+ * given error.  To work with both FAST and non-FAST errors, an implementation
+ * should generally consult error_padata rather than decoding error->e_data.
+ * For non-FAST errors, it contains the e_data decoded as either pa-data or
+ * typed-data.
+ *
+ * If this function is provided, and it returns 0 and stores data in
+ * pa_data_out, then the client library will retransmit the request.
  */
 typedef krb5_error_code
 (*krb5_clpreauth_tryagain_fn)(krb5_context context,
@@ -257,8 +261,9 @@ typedef krb5_error_code
                               krb5_kdc_req *request,
                               krb5_data *encoded_request_body,
                               krb5_data *encoded_previous_request,
-                              krb5_pa_data *pa_data_in,
+                              krb5_preauthtype pa_type,
                               krb5_error *error,
+                              krb5_pa_data **error_padata,
                               krb5_prompter_fct prompter, void *prompter_data,
                               krb5_pa_data ***pa_data_out);
 
@@ -328,6 +333,10 @@ typedef struct krb5_kdcpreauth_rock_st *krb5_kdcpreauth_rock;
 typedef struct krb5_kdcpreauth_moddata_st *krb5_kdcpreauth_moddata;
 typedef struct krb5_kdcpreauth_modreq_st *krb5_kdcpreauth_modreq;
 
+/* The verto context structure type (typedef is in verto.h; we want to avoid a
+ * header dependency for the moment). */
+struct verto_context;
+
 /* Before using a callback after version 1, modules must check the vers
  * field of the callback structure. */
 typedef struct krb5_kdcpreauth_callbacks_st {
@@ -351,15 +360,12 @@ typedef struct krb5_kdcpreauth_callbacks_st {
                       krb5_keyblock *keys);
 
     /*
-     * Get the request structure, re-encoded using DER.  Unless the client
-     * implementation is the same as the server implementation, there's a good
-     * chance that the result will not match what the client sent, so don't
-     * create any fatal errors if it doesn't match up.  Free the resulting data
-     * object with krb5_free_data.
+     * Get the encoded request body, which is sometimes needed for checksums.
+     * For a FAST request this is the encoded inner request body.  The returned
+     * pointer is an alias and should not be freed.
      */
-    krb5_error_code (*request_body)(krb5_context context,
-                                    krb5_kdcpreauth_rock rock,
-                                    krb5_data **body_out);
+    krb5_data *(*request_body)(krb5_context context,
+                               krb5_kdcpreauth_rock rock);
 
     /* Get a pointer to the FAST armor key, or NULL if the request did not use
      * FAST.  The returned pointer is an alias and should not be freed. */
@@ -381,6 +387,11 @@ typedef struct krb5_kdcpreauth_callbacks_st {
     /* Get a pointer to the client DB entry (returned as a void pointer to
      * avoid a dependency on a libkdb5 type). */
     void *(*client_entry)(krb5_context context, krb5_kdcpreauth_rock rock);
+
+    /* Get a pointer to the verto context which should be used by an
+     * asynchronous edata or verify method. */
+    struct verto_ctx *(*event_context)(krb5_context context,
+                                       krb5_kdcpreauth_rock rock);
 
     /* End of version 1 kdcpreauth callbacks. */
 } *krb5_kdcpreauth_callbacks;
@@ -422,9 +433,13 @@ typedef void
 
 /*
  * Optional: provide pa_data to send to the client as part of the "you need to
- * use preauthentication" error.  This function is not allowed to create a
- * modreq object because we have no guarantee that the client will ever make a
- * follow-up request, or that it will hit this KDC if it does.
+ * use preauthentication" error.  The implementation must invoke the respond
+ * when complete, whether successful or not, either before returning or
+ * asynchronously using the verto context returned by cb->event_context().
+ *
+ * This function is not allowed to create a modreq object because we have no
+ * guarantee that the client will ever make a follow-up request, or that it
+ * will hit this KDC if it does.
  */
 typedef void
 (*krb5_kdcpreauth_edata_fn)(krb5_context context, krb5_kdc_req *request,
@@ -455,7 +470,8 @@ typedef void
  * Optional: verify preauthentication data sent by the client, setting the
  * TKT_FLG_PRE_AUTH or TKT_FLG_HW_AUTH flag in the enc_tkt_reply's "flags"
  * field as appropriate.  The implementation must invoke the respond function
- * when complete, whether successful or not.
+ * when complete, whether successful or not, either before returning or
+ * asynchronously using the verto context returned by cb->event_context().
  */
 typedef void
 (*krb5_kdcpreauth_verify_fn)(krb5_context context,

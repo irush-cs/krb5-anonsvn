@@ -266,6 +266,8 @@ make_request(krb5_context context, krb5_tkt_creds_context ctx,
     if (!krb5_c_valid_enctype(ctx->cur_tgt->keyblock.enctype))
         return KRB5_PROG_ETYPE_NOSUPP;
 
+    krb5_free_keyblock(context, ctx->subkey);
+    ctx->subkey = NULL;
     code = krb5int_make_tgs_request(context, ctx->cur_tgt, ctx->kdcopt,
                                     ctx->cur_tgt->addresses, NULL,
                                     ctx->tgs_in_creds, NULL, NULL, &request,
@@ -557,6 +559,14 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
         return begin_non_referral(context, ctx);
     }
 
+    /* Active Directory may return a TGT to the local realm.  Try a
+     * non-referral query if we see this. */
+    referral_realm = &ctx->reply_creds->server->data[1];
+    if (data_eq(*referral_realm, ctx->cur_tgt->server->data[1])) {
+        TRACE_TKT_CREDS_SAME_REALM_TGT(context, referral_realm);
+        return begin_non_referral(context, ctx);
+    }
+
     if (ctx->referral_count == 1) {
         /* Cache the referral TGT only if it's from the local realm.
          * Make sure to note the associated authdata, if any. */
@@ -577,7 +587,6 @@ step_referrals(krb5_context context, krb5_tkt_creds_context ctx)
         return KRB5_KDC_UNREACH;
 
     /* Check for referral loops. */
-    referral_realm = &ctx->reply_creds->server->data[1];
     if (seen_realm_before(context, ctx, referral_realm))
         return KRB5_KDC_UNREACH;
     code = remember_realm(context, ctx, referral_realm);

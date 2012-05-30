@@ -1370,6 +1370,7 @@ krb5_do_preauth_tryagain(krb5_context kcontext,
                          krb5_pa_data **padata,
                          krb5_pa_data ***return_padata,
                          krb5_error *err_reply,
+                         krb5_pa_data **err_padata,
                          krb5_prompter_fct prompter, void *prompter_data,
                          krb5_clpreauth_rock preauth_rock,
                          krb5_gic_opt_ext *opte)
@@ -1409,8 +1410,8 @@ krb5_do_preauth_tryagain(krb5_context kcontext,
                                            request,
                                            encoded_request_body,
                                            encoded_previous_request,
-                                           padata[i],
-                                           err_reply,
+                                           padata[i]->pa_type,
+                                           err_reply, err_padata,
                                            prompter, prompter_data,
                                            &out_padata) == 0) {
                 if (out_padata != NULL) {
@@ -1434,7 +1435,8 @@ krb5_do_preauth(krb5_context context, krb5_kdc_req *request,
                 krb5_data *encoded_previous_request,
                 krb5_pa_data **in_padata, krb5_pa_data ***out_padata,
                 krb5_prompter_fct prompter, void *prompter_data,
-                krb5_clpreauth_rock rock, krb5_gic_opt_ext *opte)
+                krb5_clpreauth_rock rock, krb5_gic_opt_ext *opte,
+                krb5_boolean *got_real_out)
 {
     unsigned int h;
     int i, j, out_pa_list_size;
@@ -1445,6 +1447,8 @@ krb5_do_preauth(krb5_context context, krb5_kdc_req *request,
     krb5_error_code ret;
     static const int paorder[] = { PA_INFO, PA_REAL };
     int realdone;
+
+    *got_real_out = FALSE;
 
     if (in_padata == NULL) {
         *out_padata = NULL;
@@ -1640,6 +1644,7 @@ krb5_do_preauth(krb5_context context, krb5_kdc_req *request,
     if (etype_info)
         krb5_free_etype_info(context, etype_info);
 
+    *got_real_out = realdone;
     return(0);
 cleanup:
     if (out_pa_list) {

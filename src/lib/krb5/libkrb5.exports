@@ -228,6 +228,7 @@ krb5_cccol_cursor_new
 krb5_cccol_cursor_next
 krb5_change_cache
 krb5_change_password
+krb5_check_clockskew
 krb5_check_transited_list
 krb5_chpw_result_code_string
 krb5_clear_error_message
@@ -261,6 +262,7 @@ krb5_encrypt_tkt_part
 krb5_externalize_data
 krb5_externalize_opaque
 krb5_fcc_ops
+krb5_find_authdata
 krb5_find_serializer
 krb5_free_ad_kdcissued
 krb5_free_ad_signedpath
@@ -611,7 +613,6 @@ krb5int_cleanup_library
 krb5int_clean_hostname
 krb5int_cm_call_select
 krb5int_copy_data_contents_add0
-krb5int_find_authdata
 krb5int_find_pa_data
 krb5int_foreach_localaddr
 krb5int_free_data_list

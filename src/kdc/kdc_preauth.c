@@ -543,11 +543,10 @@ static void free_keys(krb5_context context, krb5_kdcpreauth_rock rock,
     free(keys);
 }
 
-static krb5_error_code
-request_body(krb5_context context, krb5_kdcpreauth_rock rock,
-             krb5_data **body_out)
+static krb5_data *
+request_body(krb5_context context, krb5_kdcpreauth_rock rock)
 {
-    return encode_krb5_kdc_req_body(rock->request, body_out);
+    return rock->inner_body;
 }
 
 static krb5_keyblock *
@@ -575,6 +574,12 @@ client_entry(krb5_context context, krb5_kdcpreauth_rock rock)
     return rock->client;
 }
 
+static verto_ctx *
+event_context(krb5_context context, krb5_kdcpreauth_rock rock)
+{
+    return rock->vctx;
+}
+
 static struct krb5_kdcpreauth_callbacks_st callbacks = {
     1,
     max_time_skew,
@@ -584,7 +589,8 @@ static struct krb5_kdcpreauth_callbacks_st callbacks = {
     fast_armor,
     get_string,
     free_string,
-    client_entry
+    client_entry,
+    event_context
 };
 
 static krb5_error_code
@@ -829,7 +835,7 @@ hint_list_next(struct hint_state *state)
         ap->get_edata(kdc_context, state->request, &callbacks, state->rock,
                       ap->moddata, ap->type, finish_get_edata, state);
     } else
-        finish_get_edata(state, ap->type, NULL);
+        finish_get_edata(state, 0, NULL);
     return;
 
 next:
