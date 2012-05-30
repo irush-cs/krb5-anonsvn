@@ -49,6 +49,7 @@ int otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                              char** service);
 int otp_pam_auth(char* user,
                  char* service,
+                 char* rhost,
                  const char* password,
                  char** prompt);
 
@@ -88,7 +89,7 @@ otp_pam_verify_otp(const struct otp_req_ctx *otp_ctx, const char *pw)
         return retval;
     }
 
-    retval = otp_pam_auth(user, service, pw, NULL);
+    retval = otp_pam_auth(user, service, otp_ctx->from, pw, NULL);
 
     free(user);
     free(service);
@@ -119,7 +120,7 @@ otp_pam_challenge(const struct otp_req_ctx *ctx,
     }
 
     /* Should fail as password == NULL, so check if prompt != NULL */
-    otp_pam_auth(user, service, NULL, &prompt);
+    otp_pam_auth(user, service, ctx->from, NULL, &prompt);
     if (prompt == NULL) {
         retval = 1;
         goto out;
@@ -186,7 +187,7 @@ otp_pam_get_user_service(const struct otp_req_ctx *ctx,
                          char** user,
                          char** service)
 {
-    int len = 0;
+    //int len = 0;
     char* str = NULL;
     char* c;
     int retval = -1;
@@ -349,7 +350,7 @@ otp_pam_converse(int n,
 
 /* Returns the pam result (PAM_SUCCESS on success) */
 int
-otp_pam_auth(char* user, char* service, const char* password, char** prompt)
+otp_pam_auth(char* user, char* service, char* rhost, const char* password, char** prompt)
 {
     struct pam_conv conv;
     otp_pam_conv_data data;
@@ -370,6 +371,11 @@ otp_pam_auth(char* user, char* service, const char* password, char** prompt)
                      service, user, pamres, pam_strerror(pamh, pamres));
         pam_end(pamh, pamres);
         return pamres;
+    }
+
+    if ((pamres = pam_set_item(pamh, PAM_RHOST, rhost)) != PAM_SUCCESS) {
+        SERVER_DEBUG(0, "[pam] pam_set_item(PAM_RHOST, %s) = %i (%s)\n",
+                     rhost, pamres, pam_strerror(pamh, pamres));
     }
 
     pamres = pam_authenticate(pamh, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK);
