@@ -1136,15 +1136,16 @@ krb5_do_preauth(krb5_context context, krb5_kdc_req *request,
                 krb5_data *encoded_previous_request, krb5_pa_data **in_padata,
                 krb5_pa_data ***out_padata, krb5_prompter_fct prompter,
                 void *prompter_data, krb5_clpreauth_rock preauth_rock,
-                krb5_gic_opt_ext *opte);
+                krb5_gic_opt_ext *opte, krb5_boolean *got_real_out);
 
 krb5_error_code KRB5_CALLCONV
 krb5_do_preauth_tryagain(krb5_context context, krb5_kdc_req *request,
                          krb5_data *encoded_request_body,
                          krb5_data *encoded_previous_request,
                          krb5_pa_data **in_padata, krb5_pa_data ***out_padata,
-                         krb5_error *err_reply, krb5_prompter_fct prompter,
-                         void *prompter_data, krb5_clpreauth_rock preauth_rock,
+                         krb5_error *err_reply, krb5_pa_data **err_padata,
+                         krb5_prompter_fct prompter, void *prompter_data,
+                         krb5_clpreauth_rock preauth_rock,
                          krb5_gic_opt_ext *opte);
 
 void KRB5_CALLCONV krb5_init_preauth_context(krb5_context);
@@ -2668,12 +2669,6 @@ krb5_error_code KRB5_CALLCONV krb5_get_default_config_files(char ***filenames);
 
 void KRB5_CALLCONV krb5_free_config_files(char **filenames);
 
-krb5_error_code krb5int_find_authdata(krb5_context context,
-                                      krb5_authdata *const *ticket_authdata,
-                                      krb5_authdata *const *ap_req_authdata,
-                                      krb5_authdatatype ad_type,
-                                      krb5_authdata ***results);
-
 krb5_error_code krb5_rd_req_decoded(krb5_context, krb5_auth_context *,
                                     const krb5_ap_req *, krb5_const_principal,
                                     krb5_keytab, krb5_flags *, krb5_ticket **);
@@ -2752,7 +2747,6 @@ krb5_error_code krb5_set_debugging_time(krb5_context, krb5_timestamp,
 krb5_error_code krb5_use_natural_time(krb5_context);
 krb5_error_code krb5_set_time_offsets(krb5_context, krb5_timestamp,
                                       krb5_int32);
-krb5_error_code krb5int_check_clockskew(krb5_context, krb5_timestamp);
 /*
  * The realm iterator functions
  */

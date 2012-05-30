@@ -526,10 +526,12 @@ krb5_init_creds_free(krb5_context context,
     zap(ctx->password.data, ctx->password.length);
     krb5_free_data_contents(context, &ctx->password);
     krb5_free_error(context, ctx->err_reply);
+    krb5_free_pa_data(context, ctx->err_padata);
     krb5_free_cred_contents(context, &ctx->cred);
     krb5_free_kdc_req(context, ctx->request);
     krb5_free_kdc_rep(context, ctx->reply);
-    krb5_free_data(context, ctx->encoded_request_body);
+    krb5_free_data(context, ctx->outer_request_body);
+    krb5_free_data(context, ctx->inner_request_body);
     krb5_free_data(context, ctx->encoded_previous_request);
     krb5int_fast_free_state(context, ctx->fast_state);
     krb5_free_pa_data(context, ctx->preauth_to_use);
@@ -707,9 +709,9 @@ restart_init_creds_loop(krb5_context context, krb5_init_creds_context ctx,
         goto cleanup;
     ctx->preauth_rock.fast_state = ctx->fast_state;
     krb5_preauth_request_context_init(context);
-    if (ctx->encoded_request_body) {
-        krb5_free_data(context, ctx->encoded_request_body);
-        ctx->encoded_request_body = NULL;
+    if (ctx->outer_request_body) {
+        krb5_free_data(context, ctx->outer_request_body);
+        ctx->outer_request_body = NULL;
     }
     if (ctx->opte &&
         (ctx->opte->flags & KRB5_GET_INIT_CREDS_OPT_PREAUTH_LIST)) {
@@ -774,7 +776,7 @@ restart_init_creds_loop(krb5_context context, krb5_init_creds_context ctx,
         ctx->request->rtime = 0;
     code = krb5int_fast_prep_req_body(context, ctx->fast_state,
                                       ctx->request,
-                                      &ctx->encoded_request_body);
+                                      &ctx->outer_request_body);
     if (code != 0)
         goto cleanup;
 cleanup:
@@ -935,6 +937,14 @@ krb5_init_creds_init(krb5_context context,
         code = KRB5_CONFIG_ETYPE_NOSUPP;
         goto cleanup;
     }
+
+    /*
+     * Set a default enctype for optimistic preauth.  If we're not doing
+     * optimistic preauth, this should ordinarily get overwritten when we
+     * process the etype-info2 of the preauth-required error.
+     */
+    if (ctx->request->nktypes > 0)
+        ctx->etype = ctx->request->ktype[0];
 
     /* addresess */
     if (opte->flags & KRB5_GET_INIT_CREDS_OPT_ADDRESS_LIST) {
@@ -1102,39 +1112,66 @@ init_creds_step_request(krb5_context context,
                         krb5_data *out)
 {
     krb5_error_code code;
+    krb5_boolean got_real;
+    char random_buf[4];
+    krb5_data random_data;
 
     if (ctx->loopcount >= MAX_IN_TKT_LOOPS) {
         code = KRB5_GET_IN_TKT_LOOP;
         goto cleanup;
     }
+    /*
+     * RFC 6113 requires a new nonce for the inner request on each try. It's
+     * permitted to change the nonce even for non-FAST so we do here.
+     */
+    random_data.length = 4;
+    random_data.data = (char *)random_buf;
+    code = krb5_c_random_make_octets(context, &random_data);
+    if (code !=0)
+        goto cleanup;
+    /*
+     * See RT ticket 3196 at MIT.  If we set the high bit, we may have
+     * compatibility problems with Heimdal, because we (incorrectly) encode
+     * this value as signed.
+     */
+    ctx->request->nonce = 0x7fffffff & load_32_n(random_buf);
+    krb5_free_data(context, ctx->inner_request_body);
+    ctx->inner_request_body = NULL;
+    code = encode_krb5_kdc_req_body(ctx->request, &ctx->inner_request_body);
+    if (code)
+        goto cleanup;
 
     if (ctx->err_reply == NULL) {
         /* either our first attempt, or retrying after PREAUTH_NEEDED */
         code = krb5_do_preauth(context,
                                ctx->request,
-                               ctx->encoded_request_body,
+                               ctx->inner_request_body,
                                ctx->encoded_previous_request,
                                ctx->preauth_to_use,
                                &ctx->request->padata,
                                ctx->prompter,
                                ctx->prompter_data,
                                &ctx->preauth_rock,
-                               ctx->opte);
+                               ctx->opte,
+                               &got_real);
+        if (code == 0 && !got_real && ctx->preauth_required)
+            code = KRB5_PREAUTH_FAILED;
         if (code != 0)
             goto cleanup;
     } else {
         if (ctx->preauth_to_use != NULL) {
             /*
              * Retry after an error other than PREAUTH_NEEDED,
-             * using e-data to figure out what to change.
+             * using ctx->err_padata to figure out what to change.
              */
             code = krb5_do_preauth_tryagain(context,
                                             ctx->request,
-                                            ctx->encoded_request_body,
+                                            ctx->inner_request_body,
                                             ctx->encoded_previous_request,
                                             ctx->preauth_to_use,
                                             &ctx->request->padata,
                                             ctx->err_reply,
+                                            ctx->err_padata,
                                             ctx->prompter,
                                             ctx->prompter_data,
                                             &ctx->preauth_rock,
@@ -1161,7 +1198,7 @@ init_creds_step_request(krb5_context context,
     if (code)
         goto cleanup;
     code = krb5int_fast_prep_req(context, ctx->fast_state,
-                                 ctx->request, ctx->encoded_request_body,
+                                 ctx->request, ctx->outer_request_body,
                                  encode_krb5_as_req,
                                  &ctx->encoded_previous_request);
     if (code != 0)
@@ -1251,13 +1288,12 @@ init_creds_step_reply(krb5_context context,
                       krb5_data *in)
 {
     krb5_error_code code;
-    krb5_pa_data **padata = NULL;
     krb5_pa_data **kdc_padata = NULL;
     krb5_boolean retry = FALSE;
     int canon_flag = 0;
     krb5_keyblock *strengthen_key = NULL;
     krb5_keyblock encrypting_key;
-    krb5_boolean fast_avail;
+    krb5_boolean fast_avail, got_real;
 
     encrypting_key.length = 0;
     encrypting_key.contents = NULL;
@@ -1273,29 +1309,33 @@ init_creds_step_reply(krb5_context context,
 
     if (ctx->err_reply != NULL) {
         code = krb5int_fast_process_error(context, ctx->fast_state,
-                                          &ctx->err_reply, &padata, &retry);
+                                          &ctx->err_reply, &ctx->err_padata,
+                                          &retry);
         if (code != 0)
             goto cleanup;
-        if (negotiation_requests_restart(context, ctx, padata)) {
+        if (negotiation_requests_restart(context, ctx, ctx->err_padata)) {
             ctx->have_restarted = 1;
             krb5_preauth_request_context_fini(context);
             if ((ctx->fast_state->fast_state_flags & KRB5INT_FAST_DO_FAST) ==0)
                 ctx->enc_pa_rep_permitted = 0;
-            code = restart_init_creds_loop(context, ctx, padata);
+            code = restart_init_creds_loop(context, ctx, ctx->err_padata);
             krb5_free_error(context, ctx->err_reply);
             ctx->err_reply = NULL;
+            krb5_free_pa_data(context, ctx->err_padata);
+            ctx->err_padata = NULL;
         } else if (ctx->err_reply->error == KDC_ERR_PREAUTH_REQUIRED &&
                    retry) {
             /* reset the list of preauth types to try */
             krb5_free_pa_data(context, ctx->preauth_to_use);
-            ctx->preauth_to_use = padata;
-            padata = NULL;
+            ctx->preauth_to_use = ctx->err_padata;
+            ctx->err_padata = NULL;
             /* this will trigger a new call to krb5_do_preauth() */
             krb5_free_error(context, ctx->err_reply);
             ctx->err_reply = NULL;
             code = sort_krb5_padata_sequence(context,
                                              &ctx->request->client->realm,
                                              ctx->preauth_to_use);
+            ctx->preauth_required = TRUE;
 
         } else if (canon_flag && ctx->err_reply->error == KDC_ERR_WRONG_REALM) {
             if (ctx->err_reply->client == NULL ||
@@ -1357,14 +1397,15 @@ init_creds_step_reply(krb5_context context,
 
     code = krb5_do_preauth(context,
                            ctx->request,
-                           ctx->encoded_request_body,
+                           ctx->inner_request_body,
                            ctx->encoded_previous_request,
                            ctx->reply->padata,
                            &kdc_padata,
                            ctx->prompter,
                            ctx->prompter_data,
                            &ctx->preauth_rock,
-                           ctx->opte);
+                           ctx->opte,
+                           &got_real);
     if (code != 0)
         goto cleanup;
 
@@ -1443,7 +1484,7 @@ init_creds_step_reply(krb5_context context,
     if (code != 0)
         goto cleanup;
     code = verify_anonymous(context, ctx->request, ctx->reply,
-                            &encrypting_key);
+                            &ctx->as_key);
     if (code)
         goto cleanup;
 
@@ -1483,7 +1524,6 @@ init_creds_step_reply(krb5_context context,
     ctx->complete = TRUE;
 
 cleanup:
-    krb5_free_pa_data(context, padata);
     krb5_free_pa_data(context, kdc_padata);
     krb5_free_keyblock(context, strengthen_key);
     krb5_free_keyblock_contents(context, &encrypting_key);

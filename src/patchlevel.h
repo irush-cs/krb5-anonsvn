@@ -51,7 +51,7 @@
  */
 #define KRB5_MAJOR_RELEASE 1
 #define KRB5_MINOR_RELEASE 10
-#define KRB5_PATCHLEVEL 0
-#define KRB5_RELTAIL "prerelease"
+#define KRB5_PATCHLEVEL 1
+#define KRB5_RELTAIL "postrelease"
 /* #undef KRB5_RELDATE */
-#define KRB5_RELTAG "trunk"
+#define KRB5_RELTAG "branches/krb5-1-10"
