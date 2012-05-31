@@ -66,7 +66,44 @@
 
   A token id may be passed to the KDC using the pre-authentication
   attribute OTP_TOKENID ("kinit -X OTP_TOKENID=mytoken ...").  If no
-  OTP_TOKENID is provided, the first token id found is being used.  */
+  OTP_TOKENID is provided, the first token id found is being used.
+
+  If OTP is not passed to the client by other means (gic), the standard
+  prompter is used with the otp_service and/or otp_vendor as prompt (excluding
+  trailing spaces and semicolons). The otp_hidden option in krb5.conf can be
+  used to specify which otp_service will have a hidden prompt (echo
+  password). The option can come either in libdefaults or inside the realms
+  sections, and can be either boolean or a section with per prompt option. e.g.
+
+      [libdefaults]
+          ...
+          otp_hidden = {
+              My_OTP = false
+              OTP_Password = true
+          }
+
+      [realms]
+          ...
+          MY.REALM = {
+              ...
+              otp_hidden = false
+          }
+
+  This should be set on the client machine configuration.
+
+  The otp_service can be set on the server either on the libdefaults section or
+  in a specific realm, using the otp_service configuration string. e.g.
+
+      [libdefaults]
+          ...
+          otp_service = Default OTP Service
+
+      [realms]
+          MY.REALM = {
+              ...
+              otp_service = MY.REALM OTP Service
+
+ */
 
 
 // for addresses
@@ -268,6 +305,11 @@ otp_client_process(krb5_context context,
     krb5_pa_otp_challenge *otp_challenge = NULL;
     krb5_data encoded_otp_challenge;
     size_t size;
+    krb5_prompt prompt[1] = {{0,0,0}};
+    int hidden = 0;
+    char* buffer = NULL;
+    char* c;
+    krb5_data *data = NULL;
 
     /* Use FAST armor key as response key.  */
     as_key = cb->fast_armor(context, rock);
@@ -340,6 +382,85 @@ otp_client_process(krb5_context context,
             CLIENT_DEBUG("Missing client context.\n");
         }
         else {
+            if (otp_ctx->otp == NULL) {
+                /*
+                  If we have otp_vendor, it will be the prompt and the
+                  otp_service will be the banner. Otherwise the otp_service
+                  will be the prompt.
+                */
+
+                /* FIXME: Find a way to select between several tokeninfo's. */
+                if (otp_challenge->n_otp_tokeninfo > 0 &&
+                    otp_challenge->otp_tokeninfo[0].otp_vendor.length > 0) {
+                    data = &otp_challenge->otp_tokeninfo[0].otp_vendor;
+                } else if (otp_challenge->otp_service.length > 0) {
+                    data = &otp_challenge->otp_service;
+                } else {
+                    buffer = strdup("OTP");
+                    if (buffer == NULL) {
+                        retval = ENOMEM;
+                        goto cleanup;
+                    }
+                }
+                if (data != NULL) {
+                    buffer = calloc(1, data->length + 1);
+                    if (buffer == NULL) {
+                        retval = ENOMEM;
+                        goto cleanup;
+                    }
+                    memcpy(buffer, data->data, data->length);
+                }
+                prompt[0].prompt = strdup(buffer);
+                if (prompt[0].prompt == NULL) {
+                    retval = ENOMEM;
+                    goto cleanup;
+                }
+
+                /* Check if otp should be echoed. */
+                c = buffer;
+                while (*c != 0) {
+                    if (*c == ' ') *c = '_';
+                    ++c;
+                }
+                hidden = otp_profile_get_hidden(context->profile, buffer, krb5_princ_realm(ctx->krb5_context, request->client));
+                CLIENT_DEBUG("otp_profile_get_hidden(%s) = %i\n", buffer, hidden);
+
+                prompt[0].hidden = hidden;
+                prompt[0].reply = calloc(1, sizeof(krb5_data));
+                if (prompt[0].reply == NULL) {
+                    retval = ENOMEM;
+                    goto cleanup;
+                }
+                prompt[0].reply->length = 64;
+                prompt[0].reply->data = calloc(1, 64);
+                if (prompt[0].reply->data == NULL) {
+                    retval = ENOMEM;
+                    goto cleanup;
+                }
+
+                free(buffer);
+                if (otp_challenge->n_otp_tokeninfo > 0 &&
+                    otp_challenge->otp_tokeninfo[0].otp_vendor.length > 0 &&
+                    otp_challenge->otp_service.length > 0) {
+                    buffer = calloc(1, otp_challenge->otp_service.length + 1);
+                    memcpy(buffer, otp_challenge->otp_service.data, otp_challenge->otp_service.length);
+                } else {
+                    buffer = NULL;
+                }
+                prompter(context, prompter_data, NULL,
+                         buffer, 1, prompt);
+
+                otp_ctx->otp = prompt[0].reply->data;
+                free(prompt[0].reply);
+                free(prompt[0].prompt);
+                prompt[0].reply = NULL;
+                prompt[0].prompt = NULL;
+            }
+#ifdef DEBUG
+            if (strlen(otp_ctx->otp) == 0) {
+                CLIENT_DEBUG("Got zero length OTP from client.\n");
+            }
+#endif
             if (otp_ctx->otp != NULL) {
                 otp_req.otp_value.data = otp_ctx->otp;
                 otp_req.otp_value.length = strlen(otp_ctx->otp);
@@ -363,7 +484,6 @@ otp_client_process(krb5_context context,
             goto cleanup;
         }
         memcpy(pa->contents, encoded_otp_req->data, pa->length);
-
         pa->pa_type = KRB5_PADATA_OTP_REQUEST;
 
         pa_array[0] = pa;
@@ -382,6 +502,12 @@ otp_client_process(krb5_context context,
  cleanup:
     if (encoded_otp_req != NULL)
         krb5_free_data(context, encoded_otp_req);
+    if (buffer != NULL)
+        free(buffer);
+    if (prompt[0].prompt != NULL)
+        free(prompt[0].prompt);
+    if (prompt[0].reply != NULL)
+        free(prompt[0].reply);
     free(pa_array);
     free(pa);
     if (otp_req.enc_data.ciphertext.data != NULL)
@@ -715,6 +841,7 @@ otp_server_get_edata(krb5_context context,
     krb5_pa_otp_challenge otp_challenge;
     krb5_data *encoded_otp_challenge = NULL;
     struct otp_server_ctx *otp_ctx = (struct otp_server_ctx *) moddata;
+    struct otp_req_ctx *otp_req = NULL;
     krb5_timestamp now_sec;
     krb5_int32 now_usec;
 
@@ -768,6 +895,34 @@ otp_server_get_edata(krb5_context context,
         (*respond)(arg,  ENOMEM, NULL);
         goto cleanup;
     }
+
+    /* Get the otp_service */
+    otp_challenge.otp_service.data = otp_profile_get_service(context->profile, krb5_princ_realm(context, request->client));
+    if (otp_challenge.otp_service.data != NULL)
+        otp_challenge.otp_service.length = strlen(otp_challenge.otp_service.data);
+
+    retval = otp_server_create_req_ctx(otp_ctx, rock, NULL, cb, &otp_req);
+    if (retval != 0) {
+        SERVER_DEBUG(retval, "Unable to create request context for edata.");
+        (*respond)(arg, retval, NULL);
+        goto cleanup;
+    }
+
+    /* Let the method set up a challenge (the tokeninfo) */
+    if (otp_req->method->ftable->server_challenge) {
+        retval = otp_req->method->ftable->server_challenge(otp_req,
+                                                           &otp_challenge.otp_tokeninfo[0]);
+        if (retval != 0) {
+            SERVER_DEBUG(retval, "[%s] server_challenge failed.",
+                         otp_req->method->name);
+            (*respond)(arg, retval, NULL);
+            goto cleanup;
+        }
+    } else {
+        SERVER_DEBUG(0, "Method [%s] doesn't set a challenge.",
+                     otp_req->method->name);
+    }
+
     /* TODO: Delegate to otp methods to decide on the flags.  */
     otp_challenge.otp_tokeninfo[0].flags = 0;
 
@@ -793,6 +948,10 @@ otp_server_get_edata(krb5_context context,
  cleanup:
     if (encoded_otp_challenge != NULL)
         krb5_free_data(context, encoded_otp_challenge);
+    if (otp_req != NULL)
+        otp_server_free_req_ctx(&otp_req);
+    if (otp_challenge.otp_service.length)
+        free(otp_challenge.otp_service.data);
     if (otp_challenge.otp_tokeninfo != NULL) {
         krb5_free_data_contents(context, &otp_challenge.otp_tokeninfo->otp_vendor);
         free(otp_challenge.otp_tokeninfo);
