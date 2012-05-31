@@ -116,3 +116,24 @@ struct otp_req_ctx {
     /** Opaque data blob passed to authentication method.  */
     char *blob;
 };
+
+/*
+ * otp profile helper functions
+ */
+
+/** Checks whether the otp should be echoed or not based on the given prompt
+    and realm. Both prompt and realm can be NULL. */
+long
+otp_profile_get_hidden(profile_t profile,
+                       const char *prompt,
+                       const krb5_data *realm);
+
+/** Returns the otp_service for the realm. If realm is NULL or doesn't have an
+    otp_service, then the libdefaults' is used. Returns NULL if no otp_service
+    is available.
+
+    The returned value should be freed.
+*/
+char*
+otp_profile_get_service(profile_t profile,
+                        const krb5_data *realm);
