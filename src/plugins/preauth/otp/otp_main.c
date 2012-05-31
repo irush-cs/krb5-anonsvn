@@ -103,7 +103,10 @@
               ...
               otp_service = MY.REALM OTP Service
 
- */
+  otp_force_address option can be used (in libdefaults or the realm section) to
+  force a single address in the replied ticket which is the connection address.
+
+*/
 
 
 // for addresses
