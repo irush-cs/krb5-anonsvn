@@ -700,6 +700,7 @@ otp_server_get_edata(krb5_context context,
     krb5_pa_otp_challenge otp_challenge;
     krb5_data *encoded_otp_challenge = NULL;
     struct otp_server_ctx *otp_ctx = (struct otp_server_ctx *) moddata;
+    struct otp_req_ctx *otp_req = NULL;
     krb5_timestamp now_sec;
     krb5_int32 now_usec;
 
@@ -753,8 +754,28 @@ otp_server_get_edata(krb5_context context,
         (*respond)(arg,  ENOMEM, NULL);
         goto cleanup;
     }
-    /* TODO: Delegate to otp methods to decide on the flags.  */
-    otp_challenge.otp_tokeninfo[0].flags = 0;
+
+    retval = otp_server_create_req_ctx(otp_ctx, rock, NULL, cb, &otp_req);
+    if (retval != 0) {
+        SERVER_DEBUG(retval, "Unable to create request context for edata.");
+        (*respond)(arg, retval, NULL);
+        goto cleanup;
+    }
+
+    /* Let the method set up a challenge (the tokeninfo) */
+    if (otp_req->method->ftable->server_challenge) {
+        retval = otp_req->method->ftable->server_challenge(otp_req,
+                                                           &otp_challenge.otp_tokeninfo[0]);
+        if (retval != 0) {
+            SERVER_DEBUG(retval, "[%s] server_challenge failed.",
+                         otp_req->method->name);
+            (*respond)(arg, retval, NULL);
+            goto cleanup;
+        }
+    } else {
+        SERVER_DEBUG(0, "Method [%s] doesn't set a challenge.",
+                     otp_req->method->name);
+    }
 
     /* Encode challenge.  */
     retval = encode_krb5_pa_otp_challenge(&otp_challenge,
@@ -778,6 +799,10 @@ otp_server_get_edata(krb5_context context,
  cleanup:
     if (encoded_otp_challenge != NULL)
         krb5_free_data(context, encoded_otp_challenge);
+    if (otp_req != NULL)
+        otp_server_free_req_ctx(&otp_req);
+    if (otp_challenge.otp_service.length)
+        free(otp_challenge.otp_service.data);
     if (otp_challenge.otp_tokeninfo != NULL) {
         krb5_free_data_contents(context, &otp_challenge.otp_tokeninfo->otp_vendor);
         free(otp_challenge.otp_tokeninfo);
